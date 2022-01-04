@@ -285,6 +285,21 @@ def FuseOps(fuse_opt_level=-1):
     return _ffi_api.FuseOps(fuse_opt_level)
 
 
+def HorizonFuseOps():
+    """Fuse operators in an expr to a larger operator according to some rules.
+
+    Parameters
+    ----------
+    
+
+    Returns
+    -------
+    ret : tvm.transform.Pass
+        The registered pass for operator fusion.
+    """
+    return _ffi_api.HorizontalFusion()
+
+
 def DefuseOps():
     """The inverse operation of FuseOps. It transforms a fused program returned by FuseOps into the
     program before FuseOps. (i.e., x == DefuseOps(FuseOps(x)))

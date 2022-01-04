@@ -55,6 +55,7 @@ def run_opt_pass(expr, opt_pass, import_prelude=False):
         Prelude(mod)
     mod = relay.transform.InferType()(mod)
     mod = opt_pass(mod)
+    print(mod)
     entry = mod["main"]
     return entry if isinstance(expr, relay.Function) else entry.body
 

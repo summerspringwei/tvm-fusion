@@ -115,7 +115,15 @@ std::vector<PrimExpr> MakeBoundCheck(const Stage& stage, const Map<IterVar, Rang
                                      const std::unordered_map<IterVar, PrimExpr>& value_map,
                                      bool skip_ivar_domain,
                                      const std::unordered_set<IterVar>& skip_iter);
-
+/**
+ * @brief Check whether Range input_1 is equal to input_2
+ * 
+ * @param input_1 
+ * @param input_2 
+ * @return true 
+ * @return false 
+ */
+bool IsRangeSame(const Range input_1, const Range input_2);
 }  // namespace te
 }  // namespace tvm
 #endif  // TVM_TE_SCHEDULE_MESSAGE_PASSING_H_

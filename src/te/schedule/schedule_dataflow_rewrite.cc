@@ -30,6 +30,7 @@
 #include "../../tir/transforms/ir_utils.h"
 #include "message_passing.h"
 #include "operation_inline.h"
+#include "message_passing.h"
 
 namespace tvm {
 namespace te {
@@ -518,6 +519,7 @@ void InjectInline(ScheduleNode* sch, bool feature_extraction_mode) {
       stage->attach_type = kInlinedAlready;
       Array<Var> args;
       PrimExpr body;
+      Array<IterVar> axis_inline;
       {
         // setup args
         const ComputeOpNode* compute = stage->op.as<ComputeOpNode>();
@@ -525,6 +527,7 @@ void InjectInline(ScheduleNode* sch, bool feature_extraction_mode) {
         for (auto iv : compute->axis) {
           args.push_back(iv->var);
         }
+        axis_inline = compute->axis;
         ICHECK_EQ(compute->body.size(), 1U) << "can only inline compute op with 1 output";
 
         if (feature_extraction_mode && compute->attrs.count("const_matrix")) {
@@ -569,6 +572,10 @@ void InjectInline(ScheduleNode* sch, bool feature_extraction_mode) {
               }
             }
           } else {
+            // ICHECK(axis_inline.size() == compute->axis.size());
+            // for(size_t a = 0; a < axis_inline.size(); ++a){
+            //   ICHECK(IsRangeSame(axis_inline[0]->dom, compute->axis[0]->dom));
+            // }
             for (size_t k = 0; k < new_body[j].size(); ++k) {
               PrimExpr new_value = Inline(tir::Evaluate(new_body[j][k]), stage->op, args, body)
                                        .as<tir::EvaluateNode>()
