@@ -295,7 +295,7 @@ class UpwardRankGraph::Creator : private ExprVisitor {
         (*it).second.push_back(GetRef<Expr>(op_node->ref));
       }
       std::ostringstream os;
-      os << "Add " << obj << " up rank " << op_node->rank << "\n";
+      os << "Add " << op_node->ref << " up rank " << op_node->rank << "\n";
       VLOG(2) << os.str();
     }
   }
@@ -517,8 +517,8 @@ class HorizontalFuseMutator : private MixedModeMutator {
     };
     auto new_inputs = MakeConcatenate(Tuple(inputs), 1);
     auto new_weights = MakeConcatenate(Tuple(weights), 0);
-    auto split_inputs = MakeSplit(params[0], Integer(2), 1);
-    auto split_weights = MakeSplit(params[1], Integer(2), 0);
+    auto split_inputs = MakeSplit(params[0], Integer(branches.size()), 1);
+    auto split_weights = MakeSplit(params[1], Integer(branches.size()), 0);
     // Modify ops in the body of function
     int i = 0;
     for(auto branch: branches){
@@ -539,7 +539,7 @@ class HorizontalFuseMutator : private MixedModeMutator {
     auto new_call = Call(func, arguments, Attrs());
     // Add following split op
     const int channel_dim = 1;
-    auto new_split = MakeSplit(new_call, Integer(2), channel_dim);
+    auto new_split = MakeSplit(new_call, Integer(branches.size()), channel_dim);
     for(size_t i=0; i<fields.size(); ++i){
       auto conv2d = pre_ops[i];
       op2split.insert({conv2d.as<ExprNode>(), new_split});
