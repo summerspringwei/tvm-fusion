@@ -138,6 +138,9 @@ IRModule FunctionPassNode::operator()(IRModule mod, const PassContext& pass_ctx)
 
   std::vector<std::pair<GlobalVar, Function> > updates;
   for (const auto& it : updated_mod->functions) {
+    std::stringstream os;
+    os << "FunctionPass " << it.first << " " << it.second.as<FunctionNode>();
+    LOG(INFO) << os.str();
     // only picks up relay::Function
     if (auto* n = it.second.as<FunctionNode>()) {
       Function func = GetRef<Function>(n);

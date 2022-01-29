@@ -209,6 +209,116 @@ inline int64_t GetConv2DSuperChannelsDim(const CallNode* call) {
 }
 
 /*!
+ * \brief Get super-dimension of output channels of conv2d
+ * \param call The conv2d call.
+ * \return Super-dimension size of output channels of conv2d.
+ */
+inline int64_t GetConv2DWeightKernelHeightDim(const CallNode* call) {
+  auto param = call->attrs.as<Conv2DAttrs>();
+  auto tweight = call->args[1]->type_as<TensorTypeNode>();
+  auto index = param->kernel_layout.operator std::string().find('H');
+  ICHECK_NE(index, std::string::npos);
+  auto channels = tir::as_const_int(tweight->shape[index]);
+  return *channels;
+}
+
+/*!
+ * \brief Get super-dimension of output channels of conv2d
+ * \param call The conv2d call.
+ * \return Super-dimension size of output channels of conv2d.
+ */
+inline int64_t GetConv2DWeightKernelWidthDim(const CallNode* call) {
+  auto param = call->attrs.as<Conv2DAttrs>();
+  auto tweight = call->args[1]->type_as<TensorTypeNode>();
+  auto index = param->kernel_layout.operator std::string().find('W');
+  ICHECK_NE(index, std::string::npos);
+  auto channels = tir::as_const_int(tweight->shape[index]);
+  return *channels;
+}
+
+
+/*!
+ * \brief Get super-dimension of input channels of conv2d
+ * \param call The conv2d call.
+ * \return Super-dimension size of Input channels of conv2d.
+ */
+inline int64_t GetConv2DInputChannelsDim(const CallNode* call) {
+  auto param = call->attrs.as<Conv2DAttrs>();
+  auto tweight = call->args[0]->type_as<TensorTypeNode>();
+  auto index = param->data_layout.operator std::string().find('C');
+  ICHECK_NE(index, std::string::npos);
+  auto channels = tir::as_const_int(tweight->shape[index]);
+  return *channels;
+}
+
+/*!
+ * \brief Get super-dimension of input channels of conv2d
+ * \param call The conv2d call.
+ * \return Super-dimension size of Input channels of conv2d.
+ */
+inline int64_t GetConv2DInputBatchDim(const CallNode* call) {
+  auto param = call->attrs.as<Conv2DAttrs>();
+  auto tweight = call->args[0]->type_as<TensorTypeNode>();
+  auto index = param->data_layout.operator std::string().find('N');
+  ICHECK_NE(index, std::string::npos);
+  auto batch = tir::as_const_int(tweight->shape[index]);
+  return *batch;
+}
+
+/*!
+ * \brief Get super-dimension of input channels of conv2d
+ * \param call The conv2d call.
+ * \return Super-dimension size of Input channels of conv2d.
+ */
+inline int64_t GetConv2DInputHeightDim(const CallNode* call) {
+  auto param = call->attrs.as<Conv2DAttrs>();
+  auto tweight = call->args[0]->type_as<TensorTypeNode>();
+  auto index = param->data_layout.operator std::string().find('H');
+  ICHECK_NE(index, std::string::npos);
+  auto height = tir::as_const_int(tweight->shape[index]);
+  return *height;
+}
+
+/*!
+ * \brief Get super-dimension of input channels of conv2d
+ * \param call The conv2d call.
+ * \return Super-dimension size of Input channels of conv2d.
+ */
+inline int64_t GetConv2DInputWidthDim(const CallNode* call) {
+  auto param = call->attrs.as<Conv2DAttrs>();
+  auto tweight = call->args[0]->type_as<TensorTypeNode>();
+  auto index = param->data_layout.operator std::string().find('W');
+  ICHECK_NE(index, std::string::npos);
+  auto height = tir::as_const_int(tweight->shape[index]);
+  return *height;
+}
+
+/*!
+ * \brief Get super-dimension of input channels of conv2d
+ * \param call The conv2d call.
+ * \return Super-dimension size of Input channels of conv2d.
+ */
+inline DataType GetConv2DInputDataType(const CallNode* call) {
+  auto param = call->attrs.as<Conv2DAttrs>();
+  ICHECK(param);
+  auto tinput = call->args[0]->type_as<TensorTypeNode>();
+  return tinput->dtype;
+}
+
+/*!
+ * \brief Get super-dimension of input channels of conv2d
+ * \param call The conv2d call.
+ * \return Super-dimension size of Input channels of conv2d.
+ */
+inline DataType GetConv2DWeightDataType(const CallNode* call) {
+  auto param = call->attrs.as<Conv2DAttrs>();
+  ICHECK(param);
+  auto tweight = call->args[1]->type_as<TensorTypeNode>();
+  return tweight->dtype;
+}
+
+
+/*!
  * \brief Is single value tensor (scalar).
  * \param expr The expr.
  * \return True if single value tensor.

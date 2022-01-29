@@ -188,7 +188,7 @@ void WarnIfMalformed(const IRModule& mod, relay::Function func) {
   auto ftv = relay::FreeTypeVars(func, mod);
   // TODO(@jroesch): refactor to use diagnostic context
   ICHECK_EQ(fv.size(), 0) << "There are free variables: " << fv << std::endl;
-  ICHECK_EQ(ftv.size(), 0) << "There are free type variables: " << fv
+  ICHECK_EQ(ftv.size(), 0) << "There are free type variables: " << ftv
                            << " in function: " << AsText(func, false);
 }
 

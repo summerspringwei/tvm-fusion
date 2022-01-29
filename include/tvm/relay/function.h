@@ -125,6 +125,8 @@ class Function : public BaseFunc {
 namespace attr {
 /*! \brief Mark the function as a primitive function. */
 constexpr const char* kPrimitive = "Primitive";
+/*! \brief Mark the function as a horizontal fusion. */
+constexpr const char* kFusion = "Fusion";
 /*!
  * \brief Indicate the compiler that should be used for building this function.
  * When this is unset or set to "default", the default compilation pipeline will be used.

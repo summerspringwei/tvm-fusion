@@ -285,7 +285,7 @@ def FuseOps(fuse_opt_level=-1):
     return _ffi_api.FuseOps(fuse_opt_level)
 
 
-def HorizonFuseOps():
+def HorizonFuseOps(fuse_opt_level=1):
     """Fuse operators in an expr to a larger operator according to some rules.
 
     Parameters
@@ -297,7 +297,7 @@ def HorizonFuseOps():
     ret : tvm.transform.Pass
         The registered pass for operator fusion.
     """
-    return _ffi_api.HorizontalFusion()
+    return _ffi_api.HorizontalFusion(fuse_opt_level)
 
 
 def DefuseOps():

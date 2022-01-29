@@ -2828,6 +2828,7 @@ bool SplitRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
     auto begin = IndexExpr(tir::make_zero(DataType::Int(32)));
     std::vector<Type> fields;
     for (unsigned int i = 0; i < indices.size(); ++i) {
+      VLOG(2) << "indices[i]: " << indices[i] << " begin:" << begin << "\n";
       ICHECK(reporter->Assert(indices[i] > begin))
           << "indices_or_sections need to be a sorted ascending list";
       std::vector<IndexExpr> oshape(data->shape.begin(), data->shape.end());

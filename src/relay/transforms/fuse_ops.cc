@@ -901,10 +901,12 @@ class FuseMutator : private MixedModeMutator {
       if (ret_group->root_ref == call) {
         // This is the root of the group
         // create the new call node.
+        LOG(INFO) << "root_ref: " << GetRef<Call>(call) << "\n";
         return MakeNewFunction(ret_group, call->checked_type(), new_call);
       } else {
         // This is an intermediate node of a fused function
         // simply return the new call.
+        LOG(INFO) << "intermediate: " << GetRef<Call>(call) << "\n";
         return std::move(new_call);
       }
     } else {

@@ -257,6 +257,9 @@ Expr DeviceAwareExprMutator::VisitExpr_(const LetNode* let_node) {
 Expr DeviceAwareExprMutator::VisitExpr_(const CallNode* call_node) {
   auto props = GetOnDeviceProps(call_node);
   if (props.body.defined() && props.is_fixed) {
+    std::stringstream os;
+    os << "call.body: " << props.body;
+    LOG(INFO) << os.str();
     // Entering lexical scope of fixed "on_device" call.
     PushDeviceType(props.device_type);
     Expr expr = VisitExpr(props.body);

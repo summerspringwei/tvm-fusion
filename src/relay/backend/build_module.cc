@@ -372,6 +372,8 @@ class RelayBuildModule : public runtime::ModuleNode {
     // hetrogenous execution.
     pass_seqs.push_back(transform::PlanDevices(default_device_type));
 
+    // Horizontal fusion
+    pass_seqs.push_back(transform::HorizontalFusion());
     // Fuse the operations if it is needed.
     pass_seqs.push_back(transform::FuseOps());
 

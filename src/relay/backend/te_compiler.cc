@@ -492,6 +492,7 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
       prim_fns.Set(prim_fn.first, Downcast<tir::PrimFunc>(prim_fn.second));
       all_prim_fn_vars.push_back(prim_fn.first);
       VLOG(1) << "lowered primitive includes bindings for '" << PrettyPrint(prim_fn.first) << "'";
+      VLOG(1) << "lowerd tir::PrimFunc is " << PrettyPrint(prim_fn.second);
     }
 
     // TODO(@areusch, @jroesch): this metadata is for AOT, this should be our interface for AOT

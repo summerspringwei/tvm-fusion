@@ -40,9 +40,11 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <set>
 
 #include "../op/memory/memory.h"
 #include "../transforms/pass_utils.h"
+#include "../transforms/prim_expr_printer.h"
 #include "utils.h"
 
 namespace tvm {
@@ -108,6 +110,58 @@ Array<IndexExpr> GetShape(const Array<IndexExpr>& shape) {
   return res;
 }
 
+// void PrintPrimExpr(const PrimExpr& expr){
+//   std::ostringstream os;
+//   if(expr.as<tir::MaxNode>()){
+//       auto max_ir = expr.as<tir::MaxNode>();
+//       os << "tir.max(" << max_ir->a << ", " << max_ir->b << ")";
+//     }else if(expr.as<tir::ReduceNode>()){
+//       auto reduce_ir = expr.as<tir::ReduceNode>();
+//       os << "tir.reduce(";
+//       for(const auto& var: reduce_ir->axis) {
+//         os << " rvar " << var;
+//       } os << " source: " << reduce_ir->source << ", combiner: " << reduce_ir->combiner << ", condition " 
+//         << reduce_ir->condition << ", value_index: " << reduce_ir->value_index << ")";
+//       for(auto& expr: reduce_ir->source){
+//         PrintPrimExpr(expr);
+//       }
+//     }else if(expr.as<tir::AddNode>()){
+//       auto add_ir = expr.as<tir::AddNode>();
+//       os << "tir.add(" << add_ir->a << ", " << add_ir->b << ")";
+//     }else if(expr.as<tir::MulNode>()){
+//       auto mul_ir = expr.as<tir::MulNode>();
+//       os << "tir.mul(" << mul_ir->a << ", " << mul_ir->b << ")";
+//     }else if(expr.as<tir::CommReducerNode>()){
+//       auto comm_reduce_ir = expr.as<tir::CommReducerNode>();
+//       os << "tir.CommReduce(" << comm_reduce_ir->lhs << ", " << comm_reduce_ir->rhs << ")";
+//     }
+//     LOG(INFO) << os.str();
+// }
+
+
+void PrintTensor(const te::Tensor& tensor){
+  auto op_name = tensor->op->name;
+  std::ostringstream os;
+  os << "name: " << op_name << ", shape: [";
+  for(auto s: tensor->shape){
+    os << s <<",";
+  }os <<"]";
+  
+  tvm::Array<te::IterVar> iter_vars = tensor->op->root_iter_vars();
+  if(tensor->op.as<te::ComputeOpNode>()){
+    os << " ComputeOp: ";
+    for(const auto& var: iter_vars) {
+      os << " " << var;
+    }
+    LOG(INFO) << os.str();
+    for(auto &expr: tensor->op.as<te::ComputeOpNode>()->body){
+      tvm::relay::PrintPrimExpr(expr);
+    }
+  }
+}
+
+
+
 // Construct a schedule for a given Relay primitive function and target.
 class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>> {
  public:
@@ -162,6 +216,28 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
         tensor_outs.push_back(tensor);
       }
     }
+    // std::unordered_set<const te::OperationNode, ObjectPtrHash, ObjectPtrEqual> visited;
+    std::unordered_set<te::Operation, ObjectHash, ObjectEqual> visited;
+    std::unordered_set<te::Tensor, ObjectHash, ObjectEqual> visited_tensor;
+    std::function<void(const te::Tensor&)> fvisit_tensor = [&](const te::Tensor& tensor){
+      PrintTensor(tensor);
+      visited.insert(tensor->op);
+      visited_tensor.insert(tensor);
+      if(!tensor->op.as<te::ComputeOpNode>()){
+        return;
+      }
+      
+      for(const te::Tensor& input_tensor: tensor->op->InputTensors()){
+        if(!visited.count(input_tensor->op) && !visited_tensor.count(input_tensor)){
+          fvisit_tensor(input_tensor);
+        }
+      }
+    };
+
+    for(auto output_tensor: outputs){
+      fvisit_tensor(output_tensor);
+    }
+    
 
     te::Schedule schedule;
     // No need to register schedule for device copy op.
@@ -229,7 +305,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     static auto fpattern = Op::GetAttrMap<TOpPattern>("TOpPattern");
     static auto flower_call = tvm::runtime::Registry::Get("relay.backend.lower_call");
     ICHECK(flower_call) << "relay.backend.lower_call is not registered.";
-
+    LOG(INFO) << "VisitExpr_" << GetRef<Call>(call_node);
     Array<te::Tensor> inputs;
     int count_tuple = 0;
     for (Expr arg : call_node->args) {
