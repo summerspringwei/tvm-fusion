@@ -45,6 +45,7 @@
 #include "../op/memory/memory.h"
 #include "../transforms/pass_utils.h"
 #include "../transforms/prim_expr_printer.h"
+#include "../transforms/prim_func_fusion_rewrite.h"
 #include "utils.h"
 
 namespace tvm {
@@ -184,6 +185,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       }
       memo_[param] = inputs;
     }
+    LOG(INFO) <<"CreateFor " << prim_func << " body " << prim_func->body << "\n";
     readable_name_stream_ << "fused";
     auto outputs = this->VisitExpr(prim_func->body);
     auto candidate_name = readable_name_stream_.str();
@@ -237,8 +239,16 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     for(auto output_tensor: outputs){
       fvisit_tensor(output_tensor);
     }
+    // Modify the ComputeOp associated with tensors
+    if(prim_func->HasNonzeroAttr(attr::kFusion)){
+      // LOG(INFO) << "prim_func->HasNonzeroAttr(attr::kFusion)" << prim_func;
+      auto prim_func_tensor_pair = RewriteFusedPrimFunc(prim_func, this->expr_te_map_, this->te_expr_map_, 2);
+      VLOG(2) << "RewriteFusedPrimFunc: " << prim_func_tensor_pair.first;
+      for(auto output_tensor: prim_func_tensor_pair.second){
+        PrintTEGraph(output_tensor);
+      }
+    }
     
-
     te::Schedule schedule;
     // No need to register schedule for device copy op.
     if (anchor_attrs_.as<DeviceCopyAttrs>() == nullptr && create_schedule_) {
@@ -336,14 +346,16 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       LoweredOutput lowered_out = (*flower_call)(GetRef<Call>(call_node), inputs, target_);
       outputs = lowered_out->outputs;
       impl = lowered_out->implementation;
+      
+      update_maps_(call_node, outputs);
     }
 
     if (create_schedule_) {
       int op_pattern = fpattern[op];
       if (!use_auto_scheduler_ && op_pattern >= kCommReduce) {
-        ICHECK(!anchor_op_.defined() || anchor_op_pattern_ < kCommReduce)
-            << "Cannot apply TOPI schedule to a primitive function with two complicated ops"
-            << " anchor=" << anchor_op_ << " current=" << op;
+        // ICHECK(!anchor_op_.defined() || anchor_op_pattern_ < kCommReduce)
+        //     << "Cannot apply TOPI schedule to a primitive function with two complicated ops"
+        //     << " anchor=" << anchor_op_ << " current=" << op;
       }
       if (op_pattern >= anchor_op_pattern_) {
         anchor_op_ = op;
@@ -383,6 +395,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
   }
 
   Array<te::Tensor> VisitExpr_(const TupleNode* op) final {
+    VLOG(2) << "TupleNode: " << op << "\n";
     Array<te::Tensor> fields;
     for (Expr field : op->fields) {
       // TODO(mbs): Generalize to be equivalent to FlattenTupleType.
@@ -391,16 +404,33 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       ICHECK_EQ(res.size(), 1);
       fields.push_back(res[0]);
     }
+    update_maps_(op, fields);
     return fields;
   }
 
   Array<te::Tensor> VisitExpr_(const TupleGetItemNode* op) final {
+    VLOG(2) << "TupleGetItemNodeNode: " << op << "\n";
     const auto* tuple_type = op->tuple->type_as<TupleTypeNode>();
     Array<te::Tensor> tuple = VisitExpr(op->tuple);
     ICHECK_EQ(tuple_type->fields.size(), tuple.size());
     ICHECK_GE(op->index, 0);
     ICHECK_LT(static_cast<size_t>(op->index), tuple.size());
-    return {tuple[op->index]};
+    Array<te::Tensor> outputs = {tuple[op->index]};
+    update_maps_(op, outputs);
+    return outputs;
+  }
+
+  void update_maps_(const ExprNode* op, Array<te::Tensor>& outputs) {
+    if (expr_te_map_.count(GetRef<Expr>(op)) == 0){
+      expr_te_map_.insert({GetRef<Expr>(op), outputs});
+    }else{
+      for(auto t: outputs){
+        expr_te_map_[GetRef<Expr>(op)].push_back(t);
+      }
+    }
+    for(auto& t: outputs){
+      te_expr_map_.insert({t, GetRef<Expr>(op)});
+    }
   }
 
  private:
@@ -416,6 +446,10 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
   // overhead for each invocation of call node when retrieving schedules.
   const Op& device_copy_op_;
   bool create_schedule_;
+  // Record the Relay::Expr to the lowered tensor expressions
+  std::unordered_map<relay::Expr, Array<te::Tensor>, ObjectPtrHash, ObjectPtrEqual> expr_te_map_;
+  // Record which expr produce the tensor
+  std::unordered_map<te::Tensor, relay::Expr, ObjectPtrHash, ObjectPtrEqual> te_expr_map_;
 };
 
 /*!

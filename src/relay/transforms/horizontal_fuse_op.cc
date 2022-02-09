@@ -145,16 +145,15 @@ class UpwardRankGraph::Creator : private ExprVisitor {
     for(auto& arg: c->args) {
       this->VisitExpr(arg);
     }
-    
-    if(auto* param = c->attrs.as<Conv2DAttrs>()){
-      auto tweight = c->args[1]->type_as<TensorTypeNode>();
-      auto oc = tir::as_const_int(tweight->shape[0]);
-      auto oi = tir::as_const_int(tweight->shape[1]);
-      auto kh = tir::as_const_int(tweight->shape[2]);
-      auto kw = tir::as_const_int(tweight->shape[3]);
-      VLOG(2) <<"strides: "<<param->strides;
-      VLOG(2) << "Conv2d weight shape: " << *oc << "," << *oi << "," << *kh <<"," << *kw;
-    }
+    // if(auto* param = c->attrs.as<Conv2DAttrs>()){
+    //   auto tweight = c->args[1]->type_as<TensorTypeNode>();
+    //   auto oc = tir::as_const_int(tweight->shape[0]);
+    //   auto oi = tir::as_const_int(tweight->shape[1]);
+    //   auto kh = tir::as_const_int(tweight->shape[2]);
+    //   auto kw = tir::as_const_int(tweight->shape[3]);
+    //   VLOG(2) <<"strides: "<<param->strides;
+    //   VLOG(2) << "Conv2d weight shape: " << *oc << "," << *oi << "," << *kh <<"," << *kw;
+    // }
   }
   
   // For now we assume that FunctionNode is at the top level
@@ -463,11 +462,12 @@ class HorizontalFuseMutator : private MixedModeMutator {
     // Get conv2d params
     auto conv2d = branches[0][0];
     auto batch = (int32_t)GetConv2DInputBatchDim(conv2d);
-    auto channels = (int32_t)GetConv2DInputChannelsDim(conv2d);
+    auto input_channels = (int32_t)GetConv2DInputChannelsDim(conv2d);
     auto height = (int32_t)GetConv2DInputHeightDim(conv2d);
     auto width = (int32_t)GetConv2DInputWidthDim(conv2d);
     auto kernel_height = (int32_t)GetConv2DWeightKernelHeightDim(conv2d);
     auto kernel_width = (int32_t)GetConv2DWeightKernelWidthDim(conv2d);
+    auto output_channels = (int32_t)GetConv2DSuperChannelsDim(conv2d);
     auto input_dtype = GetConv2DInputDataType(conv2d);
     auto weight_dtype = GetConv2DInputDataType(conv2d);
     // Create arguments for function
@@ -493,21 +493,44 @@ class HorizontalFuseMutator : private MixedModeMutator {
     input_split_indices.pop_back();
     output_split_indices.pop_back();
     //[1,3,5,5]*[2,3,1,1] ; [1,3,5,5]*[32,3,1,1]
+    // TODO(Chunwei Xia) Whether we concat at the batch axis or the channel axis
+    // Array<PrimExpr> fn_input_shape = {
+    //   // PrimExpr(batch), 
+    //   PrimExpr((int32_t)(batch * branches.size())), 
+    //   // PrimExpr(sum_of_input_channel), 
+    //   PrimExpr(channels), 
+    //   PrimExpr(height), 
+    //   PrimExpr(width)
+    // };
+    // Array<PrimExpr> fn_weight_shape = {
+    //   PrimExpr(sum_of_output_channel), 
+    //   PrimExpr(channels), 
+    //   PrimExpr(kernel_height), 
+    //   PrimExpr(kernel_width)
+    // };
+    // Array<PrimExpr> fn_output_shape = {
+    //   PrimExpr(batch), 
+    //   PrimExpr(sum_of_output_channel), 
+    //   PrimExpr(height), 
+    //   PrimExpr(width)
+    // };
+    
+    // Organize as group convolution
     Array<PrimExpr> fn_input_shape = {
-      PrimExpr(batch), 
-      PrimExpr(sum_of_input_channel), 
+      PrimExpr((int32_t)(batch * branches.size())), 
+      PrimExpr(input_channels), 
       PrimExpr(height), 
       PrimExpr(width)
     };
     Array<PrimExpr> fn_weight_shape = {
       PrimExpr(sum_of_output_channel), 
-      PrimExpr(channels), 
+      PrimExpr(input_channels), 
       PrimExpr(kernel_height), 
       PrimExpr(kernel_width)
     };
     Array<PrimExpr> fn_output_shape = {
-      PrimExpr(batch), 
-      PrimExpr(sum_of_output_channel), 
+      PrimExpr((int32_t)(batch * branches.size())), 
+      PrimExpr(output_channels), 
       PrimExpr(height), 
       PrimExpr(width)
     };
@@ -515,13 +538,13 @@ class HorizontalFuseMutator : private MixedModeMutator {
       Var("hfused_inputs", tvm::TensorType(fn_input_shape, input_dtype)), 
       Var("hfused_weights", tvm::TensorType(fn_weight_shape, weight_dtype))
     };
-    auto new_inputs = MakeConcatenate(Tuple(inputs), 1);
+    auto new_inputs = MakeConcatenate(Tuple(inputs), 0);
     auto new_weights = MakeConcatenate(Tuple(weights), 0);
-    auto split_inputs = MakeSplit(params[0], Integer(branches.size()), 1);
+    auto split_inputs = MakeSplit(params[0], Integer(branches.size()), 0);
     auto split_weights = MakeSplit(params[1], Integer(branches.size()), 0);
     // Modify ops in the body of function
     int i = 0;
-    for(auto branch: branches){
+    for(auto branch: branches) {
       auto conv2d = branch[0];
       Array<Expr> call_new_args = {TupleGetItem(split_inputs, (int32_t)i), TupleGetItem(split_weights, (int32_t)i)};
       auto new_conv2d = Call(conv2d->op, call_new_args, conv2d->attrs, conv2d->type_args, conv2d->span);
@@ -532,13 +555,14 @@ class HorizontalFuseMutator : private MixedModeMutator {
       new_inputs, 
       new_weights
     };
-    auto fn_ret = MakeConcatenate(Tuple(fields), 1);
+    auto fn_ret = MakeConcatenate(Tuple(fields), 0);
     auto func = Function(params, fn_ret, tvm::TensorType(fn_output_shape, input_dtype), {});
     func = WithAttr(std::move(func), attr::kFusion, tvm::Integer(1));
-    
+    func = WithAttr(std::move(func), attr::kPrimitive, tvm::Integer(1));
+    // Wrap function into CallNode
     auto new_call = Call(func, arguments, Attrs());
     // Add following split op
-    const int channel_dim = 1;
+    const int channel_dim = 0;
     auto new_split = MakeSplit(new_call, Integer(branches.size()), channel_dim);
     for(size_t i=0; i<fields.size(); ++i){
       auto conv2d = pre_ops[i];
@@ -572,12 +596,13 @@ namespace transform {
 Pass HorizontalFusion(int fuse_opt_level) {
   runtime::TypedPackedFunc<Function(Function, IRModule, PassContext)> pass_func =
       [=](Function f, IRModule m, PassContext pc) {
-        return Downcast<Function>(HorizontalFusion(f));
-        // if(fuse_opt_level < pc->opt_level){
-        //   return Downcast<Function>(f);
-        // }else{
-        //   return Downcast<Function>(HorizontalFusion(f));
-        // }
+        // return Downcast<Function>(HorizontalFusion(f));
+        VLOG(2) << "hfuse_opt_level: " << fuse_opt_level << ", pc->opt_level: " << pc->opt_level;
+        if(fuse_opt_level > pc->opt_level){
+          return Downcast<Function>(f);
+        }else{
+          return Downcast<Function>(HorizontalFusion(f));
+        }
       };
   return CreateFunctionPass(pass_func, 0, "HorizontalFusion", {});
 }

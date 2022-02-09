@@ -172,7 +172,7 @@ class CUDAWrappedFunc {
     CUresult result = cuLaunchKernel(fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1),
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
                                      wl.block_dim(2), wl.dyn_shmem_size, strm, void_args, nullptr);
-    LOG(INFO) << m_->GetSource("cu");
+    // LOG(INFO) << m_->GetSource("cu");
     // printf("%s\n", m_->GetSource("cu").c_str());
     if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
       const char* msg;

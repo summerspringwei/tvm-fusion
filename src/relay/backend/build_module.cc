@@ -373,7 +373,7 @@ class RelayBuildModule : public runtime::ModuleNode {
     pass_seqs.push_back(transform::PlanDevices(default_device_type));
 
     // Horizontal fusion
-    pass_seqs.push_back(transform::HorizontalFusion());
+    // pass_seqs.push_back(transform::HorizontalFusion(4));
     // Fuse the operations if it is needed.
     pass_seqs.push_back(transform::FuseOps());
 

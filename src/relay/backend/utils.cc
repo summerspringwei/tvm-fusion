@@ -209,6 +209,7 @@ Array<Pass> GetPassPrefix(const Map<tvm::Integer, tvm::Target>& targets, bool is
   if (is_vm) {
     pass_seqs.push_back(transform::InlinePrimitives());
   }
+  pass_seqs.push_back(transform::HorizontalFusion(3));
   pass_seqs.push_back(transform::CombineParallelConv2D(3));
   pass_seqs.push_back(transform::CombineParallelDense(3));
   pass_seqs.push_back(transform::CombineParallelBatchMatmul(3));
