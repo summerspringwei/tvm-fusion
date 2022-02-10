@@ -9,7 +9,7 @@
 #include <tvm/tir/op.h>
 #include <tvm/te/operation.h>
 #include <tvm/tir/stmt_functor.h>
-
+#include <tvm/topi/transform.h>
 
 #include <queue>
 #include <vector>
@@ -103,21 +103,36 @@ class TERelationBuilder {
   public:
 
   // Helper function
-  void UpdateTensorMap_(const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs){
-    for(auto& input_tensor: inputs) {
-      for(auto& output_tensor: outputs) {
-        // Update input->output map
-        if(tinput_toutput_map.count(input_tensor) == 0) {
-          tinput_toutput_map.insert({input_tensor, Array<te::Tensor>({output_tensor})});
-        }else{
-          tinput_toutput_map[input_tensor].push_back(output_tensor);
-        }
-        // Update output->input map
-        if(toutput_tinput_map.count(output_tensor) == 0){
-          toutput_tinput_map.insert({output_tensor, Array<te::Tensor>({input_tensor})});
-        }else{
-          toutput_tinput_map[output_tensor].push_back({input_tensor});
-        }
+  // void UpdateTensorMap_(const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs){
+  //   for(auto& input_tensor: inputs) {
+  //     for(auto& output_tensor: outputs) {
+  //       // Update input->output map
+  //       if(tinput_toutput_map.count(input_tensor) == 0) {
+  //         tinput_toutput_map.insert({input_tensor, Array<te::Tensor>({output_tensor})});
+  //       }else{
+  //         tinput_toutput_map[input_tensor].push_back(output_tensor);
+  //       }
+  //       // Update output->input map
+  //       if(toutput_tinput_map.count(output_tensor) == 0){
+  //         toutput_tinput_map.insert({output_tensor, Array<te::Tensor>({input_tensor})});
+  //       }else{
+  //         toutput_tinput_map[output_tensor].push_back({input_tensor});
+  //       }
+  //     }
+  //   }
+  // }
+
+  void UpdateTensorMap_(const Array<te::Tensor>& inputs, const te::Tensor output_tensor){
+    for(const auto& input_tensor: inputs){
+      if(this->tinput_toutput_map.count(input_tensor) == 0){
+        this->tinput_toutput_map.insert({input_tensor, Array<te::Tensor>({output_tensor})});
+      }else{
+        this->tinput_toutput_map[input_tensor].push_back(output_tensor);
+      }
+      if(this->toutput_tinput_map.count(output_tensor) == 0){
+        this->toutput_tinput_map.insert({output_tensor, Array<te::Tensor>({input_tensor})});
+      }else{
+        this->toutput_tinput_map[output_tensor].push_back(input_tensor);
       }
     }
   }
@@ -136,7 +151,7 @@ class TERelationBuilder {
             this->prim_expr_op_map.insert({prim_expr, tensor->op});
           }
           auto inputs = compute->InputTensors();
-          this->UpdateTensorMap_(inputs, outputs);
+          this->UpdateTensorMap_(inputs, tensor);
           recursive_visitor(inputs);
         }
         // TODO(Chunwei Xia) May consider the PlaceholderOp
@@ -151,13 +166,10 @@ class TERelationBuilder {
     for(auto input_tensor: inputs) {
       if(this->rewrite_tensor_set_.count(input_tensor)){
         continue;
-      }else{
-        this->rewrite_tensor_set_.insert(input_tensor);
       }
+      this->rewrite_tensor_set_.insert(input_tensor);
+      VLOG(2) << "rewrite_tensor_set_ add" << input_tensor;
       auto output_tensors = this->tinput_toutput_map[input_tensor];
-      for(auto t: output_tensors) {
-        this->rewrite_tensor_set_.insert(t);
-      }
       GetRewriteTensorSet(output_tensors);
     }
   }
@@ -205,7 +217,10 @@ class ProduceLoadInseartIndiceRewriter : public StmtExprMutator {
       }
     }
 
-  PrimExpr Mutate(PrimExpr expr) {return this->VisitExpr(expr);}
+  PrimExpr Mutate(PrimExpr expr) {
+    VLOG(2) << "Start rewrite: " << expr;
+    return this->VisitExpr(expr);
+  }
 
   // Modify the ProducerLoad and it's producer at the same time
   PrimExpr VisitExpr_(const ProducerLoadNode* op) final {
@@ -271,7 +286,9 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
     relation_builder.GetRewriteTensorSet(this->tensors_from_split_);
     relation_builder.PrintRelations();
     // 3. Rewrite
+    this->PrintRelation();
     auto output_tensors = this->RewriteTensors();
+    // Array<te::Tensor> output_tensors;
     return std::make_pair(expr, output_tensors);
   }
 
@@ -284,13 +301,14 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
         this->relation_builder.rewrite_tensor_set_, this->replace_map_);
       Array<PrimExpr> new_body;
       for(auto expr: compute->body){
+        VLOG(2) << "Rewrite: " << expr;
         auto new_expr = pl_rewriter.Mutate(expr);
-        VLOG(2) << "Rewrite: " << expr << " to-> " << new_expr;
+        VLOG(2) << " to-> " << new_expr;
         new_body.push_back(new_expr);
       }
       // (2) Rewrite ComputeOp's axis
       Array<IterVar> new_axis = {tir::IterVar(tvm::Range(0, extent), new_var, IterVarType::kDataPar)};
-      for(auto iter_var: compute->axis){
+      for(auto iter_var: compute->axis) {
         new_axis.push_back(iter_var);
       }
       auto new_compute = te::ComputeOp(compute->name, compute->tag, compute->attrs, new_axis, new_body);
@@ -305,16 +323,17 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
     return output_tensor;
   }
 
-  void Set2Queue_(std::set<te::Tensor>& added, std::queue<te::Tensor>& queue_tensor){
-    for(auto t: added){
-      queue_tensor.push(t);
-    }
-    added.clear();
-  }
-
   // Rewrite all the tensors, it's op and op's primExpr
   Array<te::Tensor> RewriteTensors(){
+    // Using BFS to rewrite from input to output
+    std::queue<te::Tensor> queue_tensor;
     std::set<te::Tensor> added;
+    auto funique_push_to_queue = [&added, &queue_tensor](const auto& tensor) {
+      if(added.count(tensor) == 0){
+        queue_tensor.push(tensor);
+        added.insert(tensor);
+      }
+    };
     for(auto& tensor: this->tensors_from_split_) {
       auto new_shape = Array<PrimExpr>({this->num_branch_});
       for(auto s: tensor->shape) {
@@ -324,12 +343,11 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
       this->replace_map_.insert({tensor, new_tensor});
       ICHECK(relation_builder.tinput_toutput_map.count(tensor));
       for(auto& output: relation_builder.tinput_toutput_map[tensor]){
-        added.insert(output);
+        VLOG(2) << "relation_builder.tinput_toutput_map[tensor]" << tensor << " -> " << output;
+        funique_push_to_queue(output);
       }
     }
-    // Using BFS to rewrite from input to output
-    std::queue<te::Tensor> queue_tensor;
-    Set2Queue_(added, queue_tensor);
+    
     std::set<te::Tensor> visisted;
     while(!queue_tensor.empty()) {
       auto output_tensor = queue_tensor.front();
@@ -338,13 +356,34 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
         continue;
       }
       visisted.insert(output_tensor);
+      /**
+       * 
+       * output_tensor (first compute op after split)
+       */
+      // Get ouput_tensor's parent, if it's in spilt, then replace the input tensor with
+      for(auto split_tensor: relation_builder.toutput_tinput_map[output_tensor]){
+        if(this->split_to_var_tensor_map_.count(split_tensor)){
+          auto& placeholder_tensor = this->split_to_var_tensor_map_[split_tensor];
+          VLOG(2) << "placeholder_tensor: " << placeholder_tensor;
+          Array<PrimExpr> new_shape = {PrimExpr(num_branch_), tir::Div(placeholder_tensor->shape[0], PrimExpr(num_branch_))};
+          for(size_t i = 1; i<placeholder_tensor->shape.size(); ++i){
+            new_shape.push_back(placeholder_tensor->shape[i]);
+          }
+          this->replace_map_[split_tensor] = tvm::topi::reshape(placeholder_tensor, new_shape);
+          VLOG(2) << "Connected with PlaceHolder " << placeholder_tensor << " new_output_tensor " << this->replace_map_[split_tensor] ;
+        }
+      }
+      
+      VLOG(2) << "rewirte_output_tensor" << output_tensor;
       auto new_output_tensor = this->RewriteComputeOp(output_tensor, "g", num_branch_);
       this->replace_map_[output_tensor] = new_output_tensor;
+      // If we rewrite split tensor, 
+      // we will insert topi::reshape between the new split_tensor and Placeholder
+      
       if(relation_builder.tinput_toutput_map.count(output_tensor)) {
-        for(auto child_tensor: relation_builder.tinput_toutput_map[output_tensor]) {
-          added.insert(child_tensor);
+        for(auto& child_tensor: relation_builder.tinput_toutput_map[output_tensor]) {
+          funique_push_to_queue(child_tensor);
         }
-        Set2Queue_(added, queue_tensor);
       }
     }
     Array<te::Tensor> new_output_tensor;
@@ -392,8 +431,12 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
         && call_op->args.size() == 1 
         && call_op->args[0].as<VarNode>()){
         VLOG(2) << "Find branch entry";
-        for(auto t: expr_te_map_[GetRef<Expr>(op)]) {
-          tensors_from_split_.push_back(t);
+        for(auto split_tensor: expr_te_map_[GetRef<Expr>(op)]) {
+          tensors_from_split_.push_back(split_tensor);
+          // Placeholder tensor
+          for(auto placeholder_tensor: expr_te_map_[call_op->args[0]]){
+            split_to_var_tensor_map_.insert({split_tensor, placeholder_tensor});
+          }
         }
       }
     }
@@ -417,6 +460,21 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
     return this->VisitExpr(f0);
   }
 
+  void PrintRelation() {
+    VLOG(2) << "tensors from split:";
+    for(auto t: this->tensors_from_split_){
+      VLOG(2) << t;
+    }
+    VLOG(2) << "Tensors from a branch:";
+    for(auto t: this->tensors_from_a_branch_){
+      VLOG(2) << t;
+    }
+    VLOG(2) << "split_to_var_tensor_map_:";
+    for(auto ele: this->split_to_var_tensor_map_){
+      VLOG(2) << ele.first << " -> " << ele.second;
+    }
+  }
+
   public:
   // The Function marked with kFusion to be rewrite
   Expr prim_func_;
@@ -424,6 +482,9 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
   int32_t num_branch_;
   // Tensors produced by the split op
   Array<te::Tensor> tensors_from_split_;
+  // Record the tensor produced by split node to it's parent placeholder,
+  // then at the mutate stage we inseart reshape op between them
+  std::unordered_map<te::Tensor, te::Tensor, ObjectPtrHash, ObjectPtrEqual> split_to_var_tensor_map_;
   // Tensors produced by the end op of a branch
   Array<te::Tensor> tensors_from_a_branch_;
   // Tensor replace map
@@ -449,7 +510,7 @@ void PrintTEGraph(te::Tensor tensor){
       PrintTEGraph(t);
     }
   }else if(auto placeholder = tensor->op.as<te::PlaceholderOpNode>()) {
-    VLOG(2) << "placeholder: " << placeholder->name << " " << tensor->op;
+    VLOG(2) << placeholder->name << " " << tensor;
   }
 }
 

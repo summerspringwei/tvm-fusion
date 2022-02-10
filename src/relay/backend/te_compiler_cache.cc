@@ -183,6 +183,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
         fn_inputs.push_back(tensor);
         inputs.push_back(tensor);
       }
+      this->expr_te_map_.insert({param, inputs});
       memo_[param] = inputs;
     }
     LOG(INFO) <<"CreateFor " << prim_func << " body " << prim_func->body << "\n";
