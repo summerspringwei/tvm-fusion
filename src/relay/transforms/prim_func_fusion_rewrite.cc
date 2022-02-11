@@ -102,26 +102,6 @@ class LoadTensorRelaionBuilder : public StmtExprVisitor {
 class TERelationBuilder {
   public:
 
-  // Helper function
-  // void UpdateTensorMap_(const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs){
-  //   for(auto& input_tensor: inputs) {
-  //     for(auto& output_tensor: outputs) {
-  //       // Update input->output map
-  //       if(tinput_toutput_map.count(input_tensor) == 0) {
-  //         tinput_toutput_map.insert({input_tensor, Array<te::Tensor>({output_tensor})});
-  //       }else{
-  //         tinput_toutput_map[input_tensor].push_back(output_tensor);
-  //       }
-  //       // Update output->input map
-  //       if(toutput_tinput_map.count(output_tensor) == 0){
-  //         toutput_tinput_map.insert({output_tensor, Array<te::Tensor>({input_tensor})});
-  //       }else{
-  //         toutput_tinput_map[output_tensor].push_back({input_tensor});
-  //       }
-  //     }
-  //   }
-  // }
-
   void UpdateTensorMap_(const Array<te::Tensor>& inputs, const te::Tensor output_tensor){
     for(const auto& input_tensor: inputs){
       if(this->tinput_toutput_map.count(input_tensor) == 0){
@@ -365,7 +345,9 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
         if(this->split_to_var_tensor_map_.count(split_tensor)){
           auto& placeholder_tensor = this->split_to_var_tensor_map_[split_tensor];
           VLOG(2) << "placeholder_tensor: " << placeholder_tensor;
-          Array<PrimExpr> new_shape = {PrimExpr(num_branch_), tir::Div(placeholder_tensor->shape[0], PrimExpr(num_branch_))};
+          Array<PrimExpr> new_shape = {PrimExpr(num_branch_), 
+          // tir::Div(placeholder_tensor->shape[0], PrimExpr(num_branch_))};
+          PrimExpr((int32_t)placeholder_tensor->shape[0].as<IntImmNode>()->value / num_branch_)};
           for(size_t i = 1; i<placeholder_tensor->shape.size(); ++i){
             new_shape.push_back(placeholder_tensor->shape[i]);
           }

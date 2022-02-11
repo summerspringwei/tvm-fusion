@@ -33,6 +33,8 @@
 #include <tvm/te/schedule.h>
 #include <tvm/te/schedule_pass.h>
 #include <tvm/topi/tags.h>
+#include <tvm/auto_scheduler/search_task.h>
+#include <tvm/auto_scheduler/auto_schedule.h>
 
 #include <functional>
 #include <limits>
@@ -47,6 +49,7 @@
 #include "../transforms/prim_expr_printer.h"
 #include "../transforms/prim_func_fusion_rewrite.h"
 #include "utils.h"
+// #include <../../auto_scheduler/search_policy/sketch_policy.h>
 
 namespace tvm {
 namespace relay {
@@ -240,14 +243,28 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     for(auto output_tensor: outputs){
       fvisit_tensor(output_tensor);
     }
+    Array<te::Tensor> new_output_tensors;
     // Modify the ComputeOp associated with tensors
     if(prim_func->HasNonzeroAttr(attr::kFusion)){
       // LOG(INFO) << "prim_func->HasNonzeroAttr(attr::kFusion)" << prim_func;
       auto prim_func_tensor_pair = RewriteFusedPrimFunc(prim_func, this->expr_te_map_, this->te_expr_map_, 2);
       VLOG(2) << "RewriteFusedPrimFunc: " << prim_func_tensor_pair.first;
+      new_output_tensors = prim_func_tensor_pair.second;
       for(auto output_tensor: prim_func_tensor_pair.second){
         PrintTEGraph(output_tensor);
       }
+      auto target = Target("cuda");
+      auto host_target = Target("llvm");
+      auto search_task = auto_scheduler::SearchTask(auto_scheduler::ComputeDAG(new_output_tensors),
+        std::string("kFusionPrimFunc"), target, host_target,
+        auto_scheduler::HardwareParamsNode::GetDefaultHardwareParams(target, host_target),
+        auto_scheduler::LayoutRewriteOption::NoRewrite, Array<String>({"placeholder", "placeholder"}));
+      VLOG(2) << "ComputeDAG:" << search_task.as<auto_scheduler::SearchTaskNode>()->compute_dag;
+      // auto search_policy = auto_scheduler::SketchPolicy(search_task, );
+      // Use auto schedule
+      te::Schedule schedule;
+      ICHECK(schedule.defined());
+      return CachedFunc(target_, prim_fn_var, fn_inputs, new_output_tensors, schedule, {});
     }
     
     te::Schedule schedule;
