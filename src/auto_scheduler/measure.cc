@@ -317,7 +317,7 @@ void ProgramMeasurerNode::SilentMeasure(const SearchTask& task, const Array<Meas
   // Call builder and runner
   Array<BuildResult> build_res_batch = builder->Build(inputs, verbose);
   Array<MeasureResult> result_batch = runner->Run(inputs, build_res_batch, verbose);
-
+  
   // Store result batch
   for (auto& res : result_batch) {
     results->push_back(res);

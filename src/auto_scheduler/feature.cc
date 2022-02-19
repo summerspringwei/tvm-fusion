@@ -1272,10 +1272,17 @@ void GetPerStoreFeaturesWorkerFunc(const SearchTask& task, const State& state, i
   try {
     const std::string& name = "main";
     auto pass_ctx = tvm::transform::PassContext::Current();
-
+    // Verify that copy ObjectRef will not change data
+    // for(auto t: tensors){
+    //   VLOG(1) << t <<" hash: " << ObjectPtrHash()(t);
+    // }
+    // auto test_array_copy_tensor = Array<ObjectRef>{tensors.begin(), tensors.end()};
+    // for(auto t: test_array_copy_tensor){
+    //   VLOG(1) << t <<" hash: " << ObjectPtrHash()(t);
+    // }
     auto mod = ScheduleToModule(sch, Array<ObjectRef>{tensors.begin(), tensors.end()}, name,
                                 std::unordered_map<te::Tensor, te::Buffer>());
-
+    
     bool disable_vectorize =
         pass_ctx->GetConfig<Bool>("tir.disable_vectorize", Bool(false)).value();
     bool instrument_bound_checkers =
