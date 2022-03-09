@@ -149,6 +149,7 @@ struct LoweredOutput {
   Map<String, FunctionInfo> function_metadata;
   std::unordered_map<std::string, std::pair<int, const tvm::runtime::NDArray>> params;
   runtime::Metadata metadata;
+  Map<GlobalVar, Array<te::Tensor>> var_tensor_map;
 };
 
 /*!

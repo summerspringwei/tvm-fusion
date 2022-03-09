@@ -12,6 +12,7 @@ namespace relay {
   std::pair<Expr, Array<te::Tensor>> RewriteFusedPrimFunc(const Expr prim_func, ExprTEMap expr_te_map,
   TEExprMap te_expr_map, int32_t num_branch);
   void PrintTEGraph(te::Tensor tensor);
+  Array<te::Tensor> FFusionTensorExpression(Array<te::Tensor> outputs);
 }
 }
 

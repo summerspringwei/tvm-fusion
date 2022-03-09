@@ -34,6 +34,8 @@
 #include <mutex>
 #include <stack>
 
+#include "../tir/transforms/replace_tensors_in_expr_stmt.h"
+
 namespace tvm {
 
 // Register build pipeline related options
@@ -111,6 +113,7 @@ void GetBinds(const Array<ObjectRef>& args, bool compact,
     if (const te::TensorNode* tensor_node = x.as<te::TensorNode>()) {
       te::Tensor x_ref = GetRef<te::Tensor>(tensor_node);
       if (out_binds->find(x_ref) == out_binds->end()) {
+        VLOG(2) << "Create for " << x_ref << " hash: "<< ObjectPtrHash()(x_ref);
         tir::Buffer buf =
             BufferWithOffsetAlignment(x_ref->shape, x_ref->dtype, x_ref->op->name, -1, 0, compact);
         out_binds->Set(x_ref, buf);
@@ -288,6 +291,23 @@ IRModule ApplyPasses(IRModule mod, transform::Sequential seq) {
   return mod;
 }
 
+bool ShapeEqual(Array<PrimExpr> s1, Array<PrimExpr> s2){
+  if(s1.size() != s2.size()){
+    return false;
+  }
+  for(size_t i=0; i< s1.size(); ++i){
+    if(Downcast<IntImm>(s1[i])->value != Downcast<IntImm>(s2[i])->value){
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ShapeEqual(te::Tensor t1, te::Tensor t2){
+  return ShapeEqual(t1->shape, t2->shape);
+}
+
+
 // Convert te schedule to IRModule
 IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const std::string& name,
                           const std::unordered_map<te::Tensor, tir::Buffer>& binds) {
@@ -299,14 +319,44 @@ IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const 
 
   // Before TIR transformation.
   tir::Stmt stmt = te::ScheduleOps(sch, te::InferBound(sch), debug_keep_trivial_loop);
+  VLOG(2) << "ScheduleOps to stmt: " << stmt;
   bool compact = te::VerifyCompactBuffer(stmt);
 
+  // TODO(Chunwei xia) Just for jump the bug, remove when find why
+  // Only replace tensors in arg_tensor that does not occur in used_tensor_set
+  auto used_tensor_set = tvm::tir::transforms::FGetTensorsFromStmtExpr(stmt);
+  std::unordered_map<te::Tensor, te::Tensor> replace_map;
+  Array<te::Tensor> arg_tensor_not_in_stmt;
+  for(auto& arg_tensor: args){
+    auto tensor = Downcast<te::Tensor>(arg_tensor);
+    if(!used_tensor_set.count(tensor)){
+      arg_tensor_not_in_stmt.push_back(tensor);
+    }
+  }
+  for(auto& arg_tensor: arg_tensor_not_in_stmt){
+    for(auto& used_tensor: used_tensor_set){
+      auto placeholder_op = (Downcast<te::Tensor>(arg_tensor)->op).as<te::PlaceholderOpNode>();
+      if(ShapeEqual(used_tensor, Downcast<te::Tensor>(arg_tensor)) && placeholder_op){
+        VLOG(1) << used_tensor << " hash: " << ObjectPtrHash()(used_tensor) << " arg_tensor " << arg_tensor << ObjectPtrHash()(arg_tensor);
+        replace_map.insert({used_tensor, Downcast<te::Tensor>(arg_tensor)});
+      }
+    }
+  }
+  stmt = tvm::tir::transforms::FReplaceDataProducer(stmt, replace_map);
+  
   Map<te::Tensor, tir::Buffer> out_binds;
   Array<ObjectRef> out_arg_list;
   GetBinds(args, compact, binds, &out_binds, &out_arg_list);
-
+  
+  for(auto& ele: out_binds){
+    VLOG(1) << ele.first << " hash: " << ObjectPtrHash()(ele.first) << " -> " << ele.second;
+  }
+  for(auto& ele: out_arg_list){
+    VLOG(1) << ele;
+  }
   // Build the function, converting from te::Tensor to tir::Buffer
   tir::PrimFunc f = te::SchedulePostProcToPrimFunc(out_arg_list, std::move(stmt), out_binds);
+  VLOG(2) << "PrimFunc: " << f;
   f = WithAttr(std::move(f), "global_symbol", runtime::String(name));
 
   // Mark this schedule as being converted from an TE schedule. Makes sure that

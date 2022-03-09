@@ -1080,6 +1080,26 @@ def fixed_point_multiply(data, multiplier, shift):
     """
     return _make.fixed_point_multiply(data, multiplier, shift)
 
+def concatenate_expand(data):
+    """Concatenate the input tensors along the given axis.
+
+    Parameters
+    ----------
+    data : Union(List[relay.Expr], Tuple[relay.Expr])
+        A list of tensors.
+    axis : int
+        The axis along which the tensors are concatenated.
+
+    Returns
+    -------
+    result: relay.Expr
+        The concatenated tensor.
+    """
+    data = list(data)
+    if not data:
+        raise ValueError("relay.concatenate_expand requires data to be non-empty.")
+    return _make.concatenate_expand(Tuple(data))
+
 
 def concatenate(data, axis):
     """Concatenate the input tensors along the given axis.

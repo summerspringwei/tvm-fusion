@@ -51,6 +51,7 @@ class GraphExecutorCodegen(object):
         self._list_params_name = self._mod["list_params_name"]
         self._get_param_by_name = self._mod["get_param_by_name"]
         self._get_irmodule = self._mod["get_irmodule"]
+        self._get_var_tensor_map = self.mod["get_var_tensor_map"]
         self._setup(mod, target)
 
     def _setup(self, mod, target):
@@ -93,3 +94,7 @@ class GraphExecutorCodegen(object):
             arr.copyto(param)
             params[key] = param
         return graph_json, lowered_func, params
+
+    def get_var_tensor_map(self):
+        var_tensor_map = self._get_var_tensor_map()
+        return var_tensor_map

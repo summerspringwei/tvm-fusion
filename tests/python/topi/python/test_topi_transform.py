@@ -132,6 +132,48 @@ def verify_squeeze(src_shape, axis):
         check_device(target, dev)
 
 
+def verify_concatenate_expand(shapes):
+    def get_concat_expand_schedule(target):
+        schedule_map = {
+            "cpu": topi.x86.schedule_concatenate_expand,
+            "arm_cpu": topi.arm_cpu.schedule_concatenate_expand,
+        }
+        if isinstance(target, str):
+            target = tvm.target.Target(target)
+        for key in target.keys:
+            if key in schedule_map:
+                return schedule_map[key]
+        return tvm.topi.testing.get_injective_schedule(target)
+
+    tensor_l = []
+    num_tensor = 0
+    for i, shape in enumerate(shapes):
+        tensor_l.append(te.placeholder(shape, name="A" + str(i)))
+        num_tensor+=1
+    out_tensor = topi.concatenate_expand(a_tuple=tensor_l)
+
+    def check_device(target, dev):
+        print("Running on target: %s" % target)
+        with tvm.target.Target(target):
+            s = get_concat_expand_schedule(target)(out_tensor)
+
+        foo = tvm.build(s, tensor_l + [out_tensor], target, name="concatenate_expand")
+        print(tvm.lower(s, tensor_l + [out_tensor]))
+        data_npys = [np.random.normal(size=shape).astype(tensor_l[0].dtype) for shape in shapes]
+        out_npy = np.concatenate(data_npys, axis=0)
+        new_out_shape = [num_tensor]
+        for s in shapes[0]:
+            new_out_shape.append(s)
+        out_npy = np.reshape(out_npy, new_out_shape)
+        data_nds = [tvm.nd.array(data_npy, dev) for data_npy in data_npys]
+        out_nd = tvm.nd.empty(out_npy.shape, device=dev, dtype=out_tensor.dtype)
+        foo(*(data_nds + [out_nd]))
+        tvm.testing.assert_allclose(out_nd.numpy(), out_npy)
+
+    for target, dev in tvm.testing.enabled_targets():
+        check_device(target, dev)
+
+
 def verify_concatenate(shapes, axis):
     def get_concat_schedule(target):
         schedule_map = {
@@ -938,6 +980,15 @@ def test_squeeze():
 
 
 @tvm.testing.uses_gpu
+def test_concatenate_expand():
+    verify_concatenate_expand([(2,), (2,), (2,)])
+    verify_concatenate_expand([(2, 3, 4), (2, 3, 4), (2, 3, 4)])
+    verify_concatenate_expand([(1, 2, 4), (1, 2, 4), (1, 2, 4), (1, 2, 4), (1, 2, 4)])
+    verify_concatenate_expand([(5, 6, 7, 3), (5, 6, 7, 3), (5, 6, 7, 3), (5, 6, 7, 3), (5, 6, 7, 3)])
+    verify_concatenate_expand([(1, 2400), (1, 2400), (1, 2400), (1, 2400)])
+
+
+@tvm.testing.uses_gpu
 def test_concatenate():
     verify_concatenate([(2,), (2,), (2,)], -1)
     verify_concatenate([(2, 3, 4), (2, 2, 4), (2, 5, 4)], 1)
@@ -1252,6 +1303,8 @@ def test_adv_index():
 
 if __name__ == "__main__":
     test_strided_slice()
+    test_concatenate_expand()
+    exit(0)
     test_concatenate()
     test_stack()
     test_transpose()

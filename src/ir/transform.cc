@@ -410,7 +410,7 @@ IRModule ModulePassNode::operator()(IRModule mod, const PassContext& pass_ctx) c
   ICHECK(mod.defined()) << "The input module must be set.";
 
   VLOG_CONTEXT << pass_info->name;
-  VLOG(0) << "Executing module pass with opt level: " << pass_info->opt_level;
+  // VLOG(0) << "Executing module pass with opt level: " << pass_info->opt_level;
   VLOG(1) << "Input module:" << std::endl << PrettyPrint(mod);
 
   mod = pass_func(std::move(mod), pass_ctx);

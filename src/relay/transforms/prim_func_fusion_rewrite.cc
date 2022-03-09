@@ -10,6 +10,7 @@
 #include <tvm/te/operation.h>
 #include <tvm/tir/stmt_functor.h>
 #include <tvm/topi/transform.h>
+#include <tvm/tir/stmt.h>
 
 #include <queue>
 #include <vector>
@@ -63,35 +64,36 @@ class LoadTensorRelaionBuilder : public StmtExprVisitor {
     }else{
       tensor_load_map_[t].push_back(GetRef<PrimExpr>(op));
     }
+    StmtExprVisitor::VisitExpr_(op);
   }
 
-  void VisitExpr_(const AddNode* op) {
-    this->VisitExpr(op->a);
-    this->VisitExpr(op->b);
-  }
+  // void VisitExpr_(const AddNode* op) {
+  //   this->VisitExpr(op->a);
+  //   this->VisitExpr(op->b);
+  // }
 
-  void VisitExpr_(const SubNode* op) {
-    this->VisitExpr(op->a);
-    this->VisitExpr(op->b);
-  }
+  // void VisitExpr_(const SubNode* op) {
+  //   this->VisitExpr(op->a);
+  //   this->VisitExpr(op->b);
+  // }
 
-  void VisitExpr_(const MulNode* op) {
-    this->VisitExpr(op->a);
-    this->VisitExpr(op->b);
-  }
+  // void VisitExpr_(const MulNode* op) {
+  //   this->VisitExpr(op->a);
+  //   this->VisitExpr(op->b);
+  // }
 
-  void VisitExpr_(const ReduceNode* op) {
-    for(auto prim_expr: op->source){
-      this->VisitExpr(prim_expr);
-    }
-  }
+  // void VisitExpr_(const ReduceNode* op) {
+  //   for(auto prim_expr: op->source){
+  //     this->VisitExpr(prim_expr);
+  //   }
+  // }
 
-  void VisitExpr_(const SelectNode* op) {
-    VLOG(2) << "Visit SelectNode";
-    this->VisitExpr(op->condition);
-    this->VisitExpr(op->true_value);
-    this->VisitExpr(op->false_value);
-  }
+  // void VisitExpr_(const SelectNode* op) {
+  //   VLOG(2) << "Visit SelectNode";
+  //   this->VisitExpr(op->condition);
+  //   this->VisitExpr(op->true_value);
+  //   this->VisitExpr(op->false_value);
+  // }
 
   std::unordered_map<PrimExpr, te::Tensor, ObjectPtrHash, ObjectPtrEqual> load_tensor_map_;
   std::unordered_map<te::Tensor, Array<PrimExpr>, ObjectPtrHash, ObjectPtrEqual> tensor_load_map_;
@@ -184,6 +186,7 @@ class TERelationBuilder {
 };
 
 
+
 // Modify a ComputeOp's ProducerLoad all related with specific tensor
 class ProduceLoadInseartIndiceRewriter : public StmtExprMutator {
   public:
@@ -197,10 +200,15 @@ class ProduceLoadInseartIndiceRewriter : public StmtExprMutator {
       }
     }
 
-  PrimExpr Mutate(PrimExpr expr) {
+  PrimExpr Rewrite(PrimExpr expr) { 
     VLOG(2) << "Start rewrite: " << expr;
-    return this->VisitExpr(expr);
+    return this->VisitExpr(expr); 
   }
+
+
+  // PrimExpr Mutate(PrimExpr expr) {
+  //   return this->VisitExpr(expr);
+  // }
 
   // Modify the ProducerLoad and it's producer at the same time
   PrimExpr VisitExpr_(const ProducerLoadNode* op) final {
@@ -213,42 +221,52 @@ class ProduceLoadInseartIndiceRewriter : public StmtExprMutator {
       VLOG(2) << "DataProduce: "<< t;
       ICHECK(replace_map_.count(t));
       auto new_expr = ProducerLoad(replace_map_[t], new_args);
-      VLOG(2) << "NewProducerLoad: " << new_expr;
+      VLOG(2) << "NewProducerLoad: " << new_expr << " replace old " << t 
+        << ObjectPtrHash()(t) << " with " << replace_map_[t] << ObjectPtrHash()(replace_map_[t]);
       return new_expr;
     }
     return GetRef<PrimExpr>(op);
   }
 
-  PrimExpr VisitExpr_(const AddNode* op) {
-    return tvm::tir::Add(this->VisitExpr(op->a), this->VisitExpr(op->b));
-  }
+  // PrimExpr VisitExpr_(const AddNode* op) {
+  //   return tvm::tir::Add(this->VisitExpr(op->a), this->VisitExpr(op->b));
+  // }
 
-  PrimExpr VisitExpr_(const SubNode* op) {
-    return tvm::tir::Sub(this->VisitExpr(op->a), this->VisitExpr(op->b));
-  }
+  // PrimExpr VisitExpr_(const SubNode* op) {
+  //   return tvm::tir::Sub(this->VisitExpr(op->a), this->VisitExpr(op->b));
+  // }
 
-  PrimExpr VisitExpr_(const MulNode* op) {
-    return tvm::tir::Mul(this->VisitExpr(op->a), this->VisitExpr(op->b));
-  }
+  // PrimExpr VisitExpr_(const MulNode* op) {
+  //   return tvm::tir::Mul(this->VisitExpr(op->a), this->VisitExpr(op->b));
+  // }
 
-  PrimExpr VisitExpr_(const ReduceNode* op) {
-    Array<PrimExpr> new_source;
-    for(auto prim_expr: op->source){
-      new_source.push_back(this->VisitExpr(prim_expr));
-    }
-    return tvm::tir::Reduce(op->combiner, new_source, op->axis, op->condition, op->value_index, op->init);
-  }
+  // PrimExpr VisitExpr_(const ReduceNode* op) {
+  //   Array<PrimExpr> new_source;
+  //   for(auto prim_expr: op->source){
+  //     new_source.push_back(this->VisitExpr(prim_expr));
+  //   }
+  //   return tvm::tir::Reduce(op->combiner, new_source, op->axis, op->condition, op->value_index, op->init);
+  // }
 
-  PrimExpr VisitExpr_(const SelectNode* op) {
-    return tvm::tir::Select(this->VisitExpr(op->condition), 
-      this->VisitExpr(op->true_value), this->VisitExpr(op->false_value));
-  }
+  // PrimExpr VisitExpr_(const SelectNode* op) {
+  //   return tvm::tir::Select(this->VisitExpr(op->condition), 
+  //     this->VisitExpr(op->true_value), this->VisitExpr(op->false_value));
+  // }
 
   private:
   tir::Var var_;
   std::set<te::Tensor> rewrite_tensor_set_;
   std::unordered_map<te::Tensor, te::Tensor, ObjectPtrHash, ObjectPtrEqual> replace_map_;
 };
+
+// TODO(Chunwei Xia)
+bool PlaceholderOpEqual(const te::PlaceholderOp& lhs, const te::PlaceholderOp& rhs){
+  bool equal = true;
+  equal &= (lhs->dtype == rhs->dtype) && (lhs->shape.size() == rhs->shape.size());
+  return equal;
+};
+
+
 
 
 // 3. Rewrite the relay graph and TE graph
@@ -268,7 +286,7 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
     // 3. Rewrite
     this->PrintRelation();
     auto output_tensors = this->RewriteTensors();
-    // Array<te::Tensor> output_tensors;
+    
     return std::make_pair(expr, output_tensors);
   }
 
@@ -282,7 +300,7 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
       Array<PrimExpr> new_body;
       for(auto expr: compute->body){
         VLOG(2) << "Rewrite: " << expr;
-        auto new_expr = pl_rewriter.Mutate(expr);
+        auto new_expr = pl_rewriter.Rewrite(expr);
         VLOG(2) << " to-> " << new_expr;
         new_body.push_back(new_expr);
       }
@@ -291,7 +309,17 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
       for(auto iter_var: compute->axis) {
         new_axis.push_back(iter_var);
       }
-      auto new_compute = te::ComputeOp(compute->name, compute->tag, compute->attrs, new_axis, new_body);
+      // Original topi workload will mark the conv2d in attrs like this:
+      // attrs={"workload": ["conv2d_nchw.cuda", ["TENSOR", [1, 3, 8, 8], "float32"],
+      // ["TENSOR", [2, 3, 3, 3], "float32"], [1, 1], [1, 1, 1, 1], [1, 1], "float32"]}
+      // We will remove the attrs
+      Map<String, ObjectRef> new_attrs;
+      if (compute->tag=="conv2d_nchw") {
+        new_attrs = {};
+      }else {
+        new_attrs = compute->attrs;
+      }
+      auto new_compute = te::ComputeOp(compute->name, compute->tag, new_attrs, new_axis, new_body);
       // (3) Rewrite Tensor's shape and op
       auto new_shape = Array<PrimExpr>({extent});
       for(auto s: output_tensor->shape){
@@ -346,13 +374,14 @@ class PrimFuncFusionRewriteV2 : private ExprMutator {
           auto& placeholder_tensor = this->split_to_var_tensor_map_[split_tensor];
           VLOG(2) << "placeholder_tensor: " << placeholder_tensor;
           Array<PrimExpr> new_shape = {PrimExpr(num_branch_), 
-          // tir::Div(placeholder_tensor->shape[0], PrimExpr(num_branch_))};
           PrimExpr((int32_t)placeholder_tensor->shape[0].as<IntImmNode>()->value / num_branch_)};
           for(size_t i = 1; i<placeholder_tensor->shape.size(); ++i){
             new_shape.push_back(placeholder_tensor->shape[i]);
           }
           this->replace_map_[split_tensor] = tvm::topi::reshape(placeholder_tensor, new_shape);
-          VLOG(2) << "Connected with PlaceHolder " << placeholder_tensor << " new_output_tensor " << this->replace_map_[split_tensor] ;
+          VLOG(2) << "Connected with PlaceHolder " << placeholder_tensor 
+            << " hash: " << ObjectHash()(placeholder_tensor) 
+            << " new_output_tensor " << this->replace_map_[split_tensor] ;
         }
       }
       
@@ -483,6 +512,8 @@ std::pair<Expr, Array<te::Tensor>> RewriteFusedPrimFunc(const Expr prim_func, Ex
   // return PrimFuncFusionRewrite(prim_func, expr_te_map, te_expr_map).Transform();
   return PrimFuncFusionRewriteV2(prim_func, expr_te_map, te_expr_map, num_branch).Transform();
 }
+
+
 
 // Recursively visit computeOp's input tensors
 void PrintTEGraph(te::Tensor tensor){

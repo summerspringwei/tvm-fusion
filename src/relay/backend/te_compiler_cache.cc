@@ -48,6 +48,8 @@
 #include "../transforms/pass_utils.h"
 #include "../transforms/prim_expr_printer.h"
 #include "../transforms/prim_func_fusion_rewrite.h"
+#include "../transforms/fuse_tensor_expression.h"
+#include "../../tir/transforms/replace_tensors_in_expr_stmt.h"
 #include "utils.h"
 // #include <../../auto_scheduler/search_policy/sketch_policy.h>
 
@@ -161,6 +163,7 @@ void PrintTensor(const te::Tensor& tensor){
     for(auto &expr: tensor->op.as<te::ComputeOpNode>()->body){
       tvm::relay::PrintPrimExpr(expr);
     }
+    LOG(INFO) << "ComputeOp compute: " << tensor->op;
   }
 }
 
@@ -172,7 +175,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
   explicit ScheduleBuilder(Target target, bool create_schedule = true)
       : target_(target),
         device_copy_op_(Op::Get("device_copy")),
-        create_schedule_(create_schedule) {
+        create_schedule_(create_schedule),
+        schedule_fusion_(false) {
     // Whether to use auto_scheduler schedule.
     use_auto_scheduler_ = backend::IsAutoSchedulerEnabled();
   }
@@ -185,13 +189,20 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
         tvm::te::Tensor tensor = tvm::te::placeholder(GetShape(ttype->shape), ttype->dtype);
         fn_inputs.push_back(tensor);
         inputs.push_back(tensor);
+        VLOG(2) << tensor << " hash: " << ObjectPtrHash()(tensor);
       }
       this->expr_te_map_.insert({param, inputs});
       memo_[param] = inputs;
     }
     LOG(INFO) <<"CreateFor " << prim_func << " body " << prim_func->body << "\n";
     readable_name_stream_ << "fused";
+    this->schedule_fusion_ = prim_func->HasNonzeroAttr(attr::kFusion);
     auto outputs = this->VisitExpr(prim_func->body);
+
+    VLOG(2) << "PrintTEGraph: # of outputs: " << outputs.size();
+    for(auto output_tensor: outputs){
+      PrintTEGraph(output_tensor);
+    }
     auto candidate_name = readable_name_stream_.str();
     constexpr static size_t kMaxFuncNameLength = 80;
     // WARNING: Please make sure to also update TVM_CRT_MAX_STRLEN_FUNCTION_NAME
@@ -225,46 +236,86 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     // std::unordered_set<const te::OperationNode, ObjectPtrHash, ObjectPtrEqual> visited;
     std::unordered_set<te::Operation, ObjectHash, ObjectEqual> visited;
     std::unordered_set<te::Tensor, ObjectHash, ObjectEqual> visited_tensor;
-    std::function<void(const te::Tensor&)> fvisit_tensor = [&](const te::Tensor& tensor){
-      PrintTensor(tensor);
+    std::unordered_set<te::Tensor, ObjectHash, ObjectEqual> input_placeholders;
+    std::function<void(const te::Tensor&, std::unordered_set<te::Tensor, ObjectHash, ObjectEqual>&)> 
+      fvisit_tensor = [&](const te::Tensor& tensor, std::unordered_set<te::Tensor, ObjectHash, ObjectEqual>& input_placeholders){
+      // PrintTensor(tensor);
+      VLOG(2) << tensor->op;
       visited.insert(tensor->op);
       visited_tensor.insert(tensor);
-      if(!tensor->op.as<te::ComputeOpNode>()){
-        return;
-      }
-      
-      for(const te::Tensor& input_tensor: tensor->op->InputTensors()){
-        if(!visited.count(input_tensor->op) && !visited_tensor.count(input_tensor)){
-          fvisit_tensor(input_tensor);
+      if(tensor->op.as<te::PlaceholderOpNode>()){
+        input_placeholders.insert(tensor);
+      }else if(tensor->op.as<te::ComputeOpNode>()){
+        for(const te::Tensor& input_tensor: tensor->op->InputTensors()){
+          if(!visited.count(input_tensor->op) && !visited_tensor.count(input_tensor)){
+            fvisit_tensor(input_tensor, input_placeholders);
+          }
         }
       }
     };
 
-    for(auto output_tensor: outputs){
-      fvisit_tensor(output_tensor);
-    }
+    // for(auto output_tensor: outputs){
+    //   fvisit_tensor(output_tensor, input_placeholders);
+    // }
     Array<te::Tensor> new_output_tensors;
     // Modify the ComputeOp associated with tensors
     if(prim_func->HasNonzeroAttr(attr::kFusion)){
       // LOG(INFO) << "prim_func->HasNonzeroAttr(attr::kFusion)" << prim_func;
-      auto prim_func_tensor_pair = RewriteFusedPrimFunc(prim_func, this->expr_te_map_, this->te_expr_map_, 2);
-      VLOG(2) << "RewriteFusedPrimFunc: " << prim_func_tensor_pair.first;
-      new_output_tensors = prim_func_tensor_pair.second;
-      for(auto output_tensor: prim_func_tensor_pair.second){
-        PrintTEGraph(output_tensor);
+      // auto prim_func_tensor_pair = RewriteFusedPrimFunc(prim_func, this->expr_te_map_, this->te_expr_map_, 2);
+      const auto var_expr_map = prim_func->GetAttr<Map<Expr, Expr>>("var_constant_map");
+      ICHECK(var_expr_map.defined());
+      std::unordered_map<te::Tensor, Expr, ObjectPtrHash, ObjectPtrEqual> input_tensor_constant_map;
+      // Get Var to placeholder mapping
+      for(auto outter_ele: var_expr_map.value()){
+        for(auto inner_ele: this->expr_te_map_) {
+          if(inner_ele.first.as<VarNode>()){
+            if(Downcast<Var>(outter_ele.first)->name_hint() == Downcast<Var>(inner_ele.first)->name_hint()){
+              ICHECK(inner_ele.second.size() == 1);
+              input_tensor_constant_map.insert({inner_ele.second[0], outter_ele.second});
+              VLOG(2) << "Var: " << Downcast<Var>(inner_ele.first) << " " 
+                << inner_ele.second[0]->op << " " << outter_ele.second;
+            }
+          }
+        }
       }
-      auto target = Target("cuda");
-      auto host_target = Target("llvm");
-      auto search_task = auto_scheduler::SearchTask(auto_scheduler::ComputeDAG(new_output_tensors),
-        std::string("kFusionPrimFunc"), target, host_target,
-        auto_scheduler::HardwareParamsNode::GetDefaultHardwareParams(target, host_target),
-        auto_scheduler::LayoutRewriteOption::NoRewrite, Array<String>({"placeholder", "placeholder"}));
-      VLOG(2) << "ComputeDAG:" << search_task.as<auto_scheduler::SearchTaskNode>()->compute_dag;
-      // auto search_policy = auto_scheduler::SketchPolicy(search_task, );
+      
+      new_output_tensors = tvm::relay::transform::FFusionTensorExpression(outputs, input_tensor_constant_map);
+      for(auto& t: new_output_tensors){
+        PrintTEGraph(t);
+      }
+      // Get new input placeholders after rewrite
+      Array<te::Tensor> new_fn_input_tensors;
+      input_placeholders.clear();
+      for(auto output_tensor: new_output_tensors){
+        fvisit_tensor(output_tensor, input_placeholders);
+      }
+      VLOG(2) << "num of input placeholders: " << input_placeholders.size() ;
+      for(auto input_tensor: input_placeholders){
+        new_fn_input_tensors.push_back(input_tensor);
+      }
+      // VLOG(2) << "RewriteFusedPrimFunc: " << prim_func_tensor_pair.first;
+      // new_output_tensors = prim_func_tensor_pair.second;
+      // for(auto output_tensor: prim_func_tensor_pair.second){
+      //   PrintTEGraph(output_tensor);
+      // }
+      tvm::tir::transforms::FVerifyTensorConnect(new_output_tensors[0]);
       // Use auto schedule
+      for(auto t: new_fn_input_tensors){
+        VLOG(2) << t << " hash: " << ObjectPtrHash()(t);
+      }
+      for(auto t: new_output_tensors){
+        VLOG(2) << t << " hash: " << ObjectPtrHash()(t);
+      }
+      Array<te::Operation> ops;
+      for(auto output_tensor: new_output_tensors){
+        ops.push_back(output_tensor->op);
+      }
+      // te::Schedule schedule = te::create_schedule(ops);
       te::Schedule schedule;
-      ICHECK(schedule.defined());
-      return CachedFunc(target_, prim_fn_var, fn_inputs, new_output_tensors, schedule, {});
+      // ICHECK(schedule.defined());
+      auto cached_func = CachedFunc(target_, prim_fn_var, new_fn_input_tensors, new_output_tensors, schedule, {});
+      cached_func.as<CachedFuncNode>()->need_auto_scheduler = tvm::Integer(1);
+      return cached_func;
     }
     
     te::Schedule schedule;
@@ -333,7 +384,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     static auto fpattern = Op::GetAttrMap<TOpPattern>("TOpPattern");
     static auto flower_call = tvm::runtime::Registry::Get("relay.backend.lower_call");
     ICHECK(flower_call) << "relay.backend.lower_call is not registered.";
-    LOG(INFO) << "VisitExpr_" << GetRef<Call>(call_node);
+    
     Array<te::Tensor> inputs;
     int count_tuple = 0;
     for (Expr arg : call_node->args) {
@@ -368,12 +419,12 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       update_maps_(call_node, outputs);
     }
 
-    if (create_schedule_) {
+    if (create_schedule_ && !schedule_fusion_) {
       int op_pattern = fpattern[op];
       if (!use_auto_scheduler_ && op_pattern >= kCommReduce) {
-        // ICHECK(!anchor_op_.defined() || anchor_op_pattern_ < kCommReduce)
-        //     << "Cannot apply TOPI schedule to a primitive function with two complicated ops"
-        //     << " anchor=" << anchor_op_ << " current=" << op;
+        ICHECK(!anchor_op_.defined() || anchor_op_pattern_ < kCommReduce)
+            << "Cannot apply TOPI schedule to a primitive function with two complicated ops"
+            << " anchor=" << anchor_op_ << " current=" << op;
       }
       if (op_pattern >= anchor_op_pattern_) {
         anchor_op_ = op;
@@ -464,6 +515,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
   // overhead for each invocation of call node when retrieving schedules.
   const Op& device_copy_op_;
   bool create_schedule_;
+  bool schedule_fusion_;
   // Record the Relay::Expr to the lowered tensor expressions
   std::unordered_map<relay::Expr, Array<te::Tensor>, ObjectPtrHash, ObjectPtrEqual> expr_te_map_;
   // Record which expr produce the tensor

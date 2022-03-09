@@ -58,6 +58,10 @@ TVM_REGISTER_GLOBAL("topi.squeeze").set_body([](TVMArgs args, TVMRetValue* rv) {
   *rv = squeeze(args[0], ArrayOrInt(args[1]));
 });
 
+TVM_REGISTER_GLOBAL("topi.concatenate_expand").set_body([](TVMArgs args, TVMRetValue* rv) {
+  *rv = concatenate_expand(args[0]);
+});
+
 TVM_REGISTER_GLOBAL("topi.concatenate").set_body([](TVMArgs args, TVMRetValue* rv) {
   *rv = concatenate(args[0], args[1]);
 });

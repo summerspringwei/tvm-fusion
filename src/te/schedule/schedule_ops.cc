@@ -43,6 +43,7 @@ using namespace tir;
 Stmt MakePipeline(const Stage& s, const std::unordered_map<IterVar, Range>& dom_map, Stmt consumer,
                   bool debug_keep_trivial_loop) {
   Stmt producer = s->op->BuildProvide(s, dom_map, debug_keep_trivial_loop);
+  // VLOG(2) << "producer: " << producer;
   if (s->double_buffer) {
     producer = AttrStmt(s->op, tir::attr::double_buffer_scope, 1, producer);
   }
@@ -51,8 +52,10 @@ Stmt MakePipeline(const Stage& s, const std::unordered_map<IterVar, Range>& dom_
   if (consumer.defined() && !is_no_op(consumer)) {
     pipeline = SeqStmt({producer, consumer});
   }
-
-  return s->op->BuildRealize(s, dom_map, pipeline, s->scope);
+  // VLOG(2) << "pipeline: " << producer;
+  auto result = s->op->BuildRealize(s, dom_map, pipeline, s->scope);
+  // VLOG(2) << "MakePipeline return: " << result;
+  return result;
 }
 
 // inject the operator's realization on the stmt.
@@ -337,6 +340,7 @@ Stmt ScheduleOps(Schedule sch, Map<IterVar, Range> dom_map_, bool debug_keep_tri
   // reverse the post DFS order.
   for (size_t i = sch->stages.size(); i != 0; --i) {
     Stage s = sch->stages[i - 1];
+    VLOG(2) << "Stage: " << s;
     ICHECK_NE(s->attach_type, kInline) << "call schedule.normalize before scheduleops";
     ICHECK(s->op.defined());
     // no need to specify place holder op.
@@ -358,13 +362,17 @@ Stmt ScheduleOps(Schedule sch, Map<IterVar, Range> dom_map_, bool debug_keep_tri
     } else if (attach_spec->attach_type == kInlinedAlready) {
       // do nothing
     } else if (attach_spec->attach_type == kGroupRoot) {
+      VLOG(2) << "MakePipeline op: " << s->op;
       ICHECK(!s->group.defined());
       body = MakePipeline(s, dom_map, body, debug_keep_trivial_loop);
+      VLOG(2) << "MakePipeline body: " << body;
     } else {
       ICHECK_EQ(attach_spec->attach_type, kScope);
       ICHECK(body.defined());
+      VLOG(2) << "InjectAttach op: " << s->op;
       InjectAttach mutator(s, attach_spec, dom_map, debug_keep_trivial_loop);
       body = mutator(std::move(body));
+      VLOG(2) << "InjectAttach body: " << body;
       ICHECK(mutator.found_attach)
           << "did not find attachment point for " << s << " in " << attach_spec->attach_stage->op
           << " x " << attach_spec->attach_ivar << ", body:\n"

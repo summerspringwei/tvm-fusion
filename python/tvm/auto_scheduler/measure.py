@@ -634,6 +634,7 @@ def _local_build_worker(inp_serialized, build_func, verbose):
         except Exception:
             error_no = MeasureErrorNo.COMPILE_HOST
             error_msg = make_traceback_info()
+            print(error_msg)
     else:
         filename = ""
 

@@ -40,6 +40,7 @@
 #include "../transforms/device_aware_visitors.h"
 #include "./te_compiler.h"
 #include "./utils.h"
+#include "tir_attr_metadata_visitor.h"
 
 namespace tvm {
 namespace relay {
@@ -280,6 +281,7 @@ class GraphExecutorCodegen : public backend::MemoizedExprTranslator<std::vector<
     // This is the point where we separate the functions in the module by target
     ret.lowered_funcs = tec::GetPerTargetModules(lowered_mod);
     ret.external_mods = external_modules.value();
+    ret.var_tensor_map = GetPerVarTensorsFromIRModule(lowered_mod);
     return ret;
   }
 
@@ -634,6 +636,15 @@ class GraphExecutorCodegenModule : public runtime::ModuleNode {
         Function func = args[0];
         String mod_name = args[1];
         this->output_ = this->codegen_->Codegen(func, mod_name);
+        // Get kFusion output tensors
+        for(auto ele: this->output_.var_tensor_map) {
+          std::stringstream os;
+          os << "Var: " << ele.first << " Tensors: ";
+          for(auto t: ele.second) {
+            os << t;
+          }
+          VLOG(2) << os.str();
+        }
       });
     } else if (name == "get_graph_json") {
       return PackedFunc(
@@ -674,6 +685,12 @@ class GraphExecutorCodegenModule : public runtime::ModuleNode {
     } else if (name == "get_function_metadata") {
       return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
         *rv = this->output_.function_metadata;
+      });
+    } else if (name == "get_var_tensor_map") {
+      return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
+        *rv = this->output_.var_tensor_map;
+        VLOG(2) << "*rv = this->output_.var_tensor_map";
+        PrintVarTensorMap(this->output_.var_tensor_map);
       });
     } else {
       return PackedFunc([](TVMArgs args, TVMRetValue* rv) {});

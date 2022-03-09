@@ -41,6 +41,7 @@ def schedule_conv2d_nchw(cfg, outs):
 
     def _callback(op):
         if op.tag == "conv2d_nchw":
+            print("python/tvm/topi/cuda/conv2d.py:44 {}".format(op))
             schedule_direct_cuda(cfg, s, op.output(0))
 
     traverse_inline(s, outs[0].op, _callback)

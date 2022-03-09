@@ -24,7 +24,7 @@ from ..utils import get_const_tuple
 
 def schedule_direct_cuda(cfg, s, conv):
     """schedule optimized for batch size = 1"""
-
+    print("schedule optimized for batch size = 1")
     ##### space definition begin #####
     n, f, y, x = s[conv].op.axis
     rc, ry, rx = s[conv].op.reduce_axis

@@ -46,6 +46,7 @@
 #include "../transforms/device_aware_visitors.h"
 #include "./te_compiler_cache.h"
 #include "./utils.h"
+#include "tir_attr_metadata_visitor.h"
 
 namespace tvm {
 namespace relay {
@@ -242,6 +243,14 @@ class TECompilerImpl : public TECompilerNode {
         value->cached_func = cfunc;
         return value;
       }
+    }
+
+    if (cfunc->need_auto_scheduler != 0) {
+      auto new_cfunc = CachedFunc(key->target, cfunc->prim_fn_var, cfunc->inputs, 
+      cfunc->outputs, cfunc->schedule, cfunc->shape_func_param_states, cfunc->funcs);
+      new_cfunc->need_auto_scheduler = cfunc->need_auto_scheduler;
+      value->cached_func = new_cfunc;
+      return value;
     }
 
     // NOTE: array will copy on write.
@@ -500,14 +509,33 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     func_with_metadata = WithAttr(func_with_metadata, "prim_fn_var", lowered_func->prim_fn_var);
     func_with_metadata = WithAttr(func_with_metadata, "prim_funcs", prim_fns);
     func_with_metadata = WithAttr(func_with_metadata, tvm::attr::kTarget, lowered_func->target);
-
+    
+    
     // Provide a callback hook which allows one-level up code generators to
     // act when we process a function.
-    this->process_fn_(func_with_metadata);
+    if(lowered_func->need_auto_scheduler == 0){
+      this->process_fn_(func_with_metadata);
+    }
 
     auto tir_call_attrs = make_object<TIRCallAttrs>();
     if (func->HasNonzeroAttr(attr::kReshapeOnly)) {
       tir_call_attrs->metadata.Set(attr::kReshapeOnly, tvm::Integer(1));
+    }
+
+    if(lowered_func->need_auto_scheduler){
+      VLOG(2) << "lowered_func->need_auto_scheduler" << lowered_func->need_auto_scheduler;
+      // By default in the io_tensors the input tensors is pushed before output tensors
+      for(auto t: lowered_func->inputs){
+        VLOG(2) << "Input tensors: " << t;
+      }for(auto t: lowered_func->outputs){
+        VLOG(2) << "Output tensors: " << t;
+      }
+      Array<te::Tensor> io_tensors(lowered_func->inputs);
+      for(auto output_tensor: lowered_func->outputs){
+        io_tensors.push_back(output_tensor);
+      }
+      tir_call_attrs->metadata.Set("output_tensors", io_tensors);
+      tir_call_attrs->metadata.Set("kFusion", tvm::PrimExpr(1));
     }
 
     auto device_copy = IsDeviceCopy(func);
@@ -618,7 +646,12 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     for (const auto& arg : call_node->args) {
       args.push_back(VisitExpr(arg));
     }
-
+    // Check whether the kFusion attr is set
+    auto tir_call_attr = pair.second.as<TIRCallAttrs>();
+    if(tir_call_attr->metadata.count(std::string("kFusion"))){
+      VLOG(2) << tir_call_attr->metadata["kFusion"];
+    }
+    
     // Replace with direct call to lowered primitive, and attach annotations to record calling
     // convention.
     return Call(pair.first, args, pair.second);
@@ -903,6 +936,16 @@ IRModule LowerTE(const IRModule& module, TargetMap targets, const String& module
 
   auto updated_module = LowerTensorExpr(targets, module_name, compiler, process_fn)(module);
 
+  // Get kFusion output_tensors
+  for(auto ele: updated_module->functions){
+    VLOG(2) << ele.first << ele.second;
+    auto output_tensors = GetOutputTensorsFromRelayFunc(ele.second);
+    VLOG(2) << "GetOutputTensorsFromRelayFunc:";
+    for(auto t: output_tensors){
+      VLOG(2) << t;
+    }
+  }
+
   backend::UpdateAutoSchedulerOpWeights(compiler);
 
   // Copy the lowered functions into the return module
@@ -924,7 +967,6 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod) {
       // Extract target
       Optional<Target> target = func->GetAttr<Target>(tvm::attr::kTarget);
       ICHECK(target) << "Target should be set at this point";
-
       // Put the function in per_target_modules
       if (!per_target_modules.count(target.value())) {
         // Initialize the IRModule for this target with the attributes from the input IRModule
@@ -937,7 +979,13 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod) {
         IRModule target_module = per_target_modules.at(target.value());
         target_module->Add(var, func);
       }
-    } else if (!func->IsInstance<relay::FunctionNode>()) {
+    } else if (func->IsInstance<relay::FunctionNode>()) {
+      auto output_tensors = GetOutputTensorsFromRelayFunc(func);
+      VLOG(2) << "GetOutputTensorsFromRelayFunc:";
+      for(auto t: output_tensors){
+        VLOG(2) << t;
+      }
+    } else {
       LOG(FATAL)
           << "The function types in the IRModule should be RelayFunction or PrimFunc, but got "
           << func->GetTypeKey();

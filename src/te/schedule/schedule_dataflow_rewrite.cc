@@ -441,6 +441,9 @@ Array<Tensor> Schedule::cache_write(const Array<Tensor>& tensor_array, const std
   ICHECK(tensor_array.size() > 0) << "size of tensor_array must be greater than 0";
   Tensor tensor = tensor_array[0];
   Stage orig_stage = operator[](tensor->op);
+  for(const auto& t: tensor_array){
+    VLOG(2) << t->op;
+  }
   const ComputeOpNode* compute = tensor->op.as<ComputeOpNode>();
   ICHECK(static_cast<size_t>(compute->num_outputs()) == tensor_array.size())
       << "size of input tensor list must be same as number of stage outputs";
@@ -559,6 +562,7 @@ void InjectInline(ScheduleNode* sch, bool feature_extraction_mode) {
             PrimExpr new_value = Inline(tir::Evaluate(new_body[j][0]), stage->op, args, body)
                                      .as<tir::EvaluateNode>()
                                      ->value;
+            // VLOG(2) << "new_value: " << new_value;
             if (!new_value.same_as(new_body[j][0])) {
               changed[j] = true;
               const tir::ReduceNode* r = new_value.as<tir::ReduceNode>();
@@ -580,6 +584,7 @@ void InjectInline(ScheduleNode* sch, bool feature_extraction_mode) {
               PrimExpr new_value = Inline(tir::Evaluate(new_body[j][k]), stage->op, args, body)
                                        .as<tir::EvaluateNode>()
                                        ->value;
+              // VLOG(2) << "new_value: " << new_value;
               if (!new_value.same_as(new_body[j][k])) {
                 new_body[j].Set(k, new_value);
                 changed[j] = true;
@@ -619,6 +624,7 @@ void InjectInline(ScheduleNode* sch, bool feature_extraction_mode) {
         }
         s->op = op;
       }
+      // VLOG(2) << "new_op: " << s->op;
     } else if (hybrid_changed[i]) {
       const HybridOpNode* hybrid = sch->stages[i]->op.as<HybridOpNode>();
       ICHECK(hybrid);

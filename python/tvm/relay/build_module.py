@@ -20,6 +20,8 @@ from a Relay expression.
 """
 import warnings
 import numpy as np
+from tvm.auto_scheduler.compute_dag import ComputeDAG
+from tvm.auto_scheduler.utils import get_const_tuple
 
 from tvm.ir import IRModule
 
@@ -87,6 +89,7 @@ def _convert_param_map(params):
     return inputs
 
 
+
 class BuildModule(object):
     """Build an IR module to run on TVM graph executor. This class is used
     to expose the `RelayBuildModule` APIs implemented in C++.
@@ -101,6 +104,7 @@ class BuildModule(object):
         self._set_params_func = self.mod["set_params"]
         self._get_params_func = self.mod["get_params"]
         self._get_function_metadata = self.mod["get_function_metadata"]
+        self._get_var_tensor_map = self.mod["get_var_tensor_map"]
 
     def build(
         self, mod, target=None, target_host=None, params=None, executor="graph", mod_name=None
@@ -176,6 +180,57 @@ class BuildModule(object):
         mod = self.get_module()
         params = self.get_params()
         executor_config = self.get_graph_json() if executor == "graph" else None
+        var_tensor_map = self.get_var_tensor_map()
+        
+        from tvm.auto_scheduler import search_task
+        from tvm import auto_scheduler
+        import tvm.target
+        if var_tensor_map is not None:
+            for global_var, tensor in var_tensor_map.items():
+                print("global_var {}".format(global_var))
+                for t in tensor:
+                    print(t)
+                print("print tensors done")
+                from tvm import auto_scheduler
+                @auto_scheduler.register_workload
+                def wrap_schedule_compute_func():
+                    return tensor
+                task = tvm.auto_scheduler.SearchTask(func=wrap_schedule_compute_func, target=tvm.target.cuda())
+                print("task.compute_dag start")
+                print(task.compute_dag)
+                print("task.compute_dag end")
+                log_file = "/tmp/tvm_kfusion.log"
+                import os
+                if os.path.exists(log_file):
+                    os.remove(log_file)
+                # sch, args = task.apply_best(log_file)
+                # print("Lowered TIR:")
+                # print(tvm.lower(sch, args, simple_mode=True))
+                # func = tvm.build(sch, args, target)
+                # exit(0)
+
+                nd_arrays = []
+                for t in tensor:
+                    d = np.ones(shape=get_const_tuple(t.shape), dtype=np.float32)
+                    print(d)
+                    nd = tvm.nd.array(d, device=tvm.cuda())
+                    print(nd)
+                    nd_arrays.append(nd)
+                
+                measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, n_parallel=1, min_repeat_ms=300, timeout=10)
+                tuner = auto_scheduler.TaskScheduler([task])
+                tune_option = auto_scheduler.TuningOptions(
+                    num_measure_trials=5,  # change this to 20000 to achieve the best performance
+                    runner=measure_ctx.runner,
+                    measure_callbacks=[auto_scheduler.RecordToFile(log_file)])
+                tuner.tune(tune_option)
+                sch, args = task.apply_best(log_file)
+                print("Lowered TIR:")
+                print(tvm.lower(sch, args, simple_mode=True))
+                func = tvm.build(sch, args, tvm.target.cuda())
+                func(*nd_arrays)
+                print(nd_arrays[-1])
+                exit(0)
 
         return executor_config, mod, params
 
@@ -237,6 +292,18 @@ class BuildModule(object):
         ret = {}
         for key, value in params.items():
             ret[key] = value.data
+        return ret
+    
+    def get_var_tensor_map(self):
+        """Return the var tensor map 
+        that need to be scheduled by auto_scheduler"""
+        var_tensor_map = self._get_var_tensor_map()
+        ret = {}
+        for var, array_tensor in var_tensor_map.items():
+            arr = []
+            for t in array_tensor:
+                arr.append(t)
+            ret[var] = arr
         return ret
 
 

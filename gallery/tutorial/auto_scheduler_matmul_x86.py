@@ -87,7 +87,7 @@ def matmul_add(N, L, M, dtype):
 #   - replace "llvm" below with "llvm -mcpu=core-avx2" to enable AVX2
 #   - replace "llvm" below with "llvm -mcpu=skylake-avx512" to enable AVX-512
 
-target = tvm.target.Target("llvm")
+target = tvm.target.Target("cuda")
 N = L = M = 1024
 task = tvm.auto_scheduler.SearchTask(func=matmul_add, args=(N, L, M, "float32"), target=target)
 
@@ -150,7 +150,8 @@ b_np = np.random.uniform(size=(L, M)).astype(np.float32)
 c_np = np.random.uniform(size=(N, M)).astype(np.float32)
 out_np = a_np.dot(b_np) + c_np
 
-dev = tvm.cpu()
+# dev = tvm.cpu()
+dev = tvm.cuda()
 a_tvm = tvm.nd.array(a_np, device=dev)
 b_tvm = tvm.nd.array(b_np, device=dev)
 c_tvm = tvm.nd.array(c_np, device=dev)

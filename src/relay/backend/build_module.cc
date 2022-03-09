@@ -35,6 +35,7 @@
 #include "../../target/source/codegen_source_base.h"
 #include "te_compiler.h"
 #include "utils.h"
+#include "tir_attr_metadata_visitor.h"
 
 namespace tvm {
 namespace relay {
@@ -97,6 +98,14 @@ struct ExecutorCodegen {
   }
 
   runtime::Metadata GetMetadata() { return CallFunc<runtime::Metadata>("get_metadata"); }
+
+  Map<GlobalVar, Array<te::Tensor>> GetVarTensorMap() {
+    auto result = CallFunc<Map<GlobalVar, Array<te::Tensor>>>("get_var_tensor_map", nullptr);
+    VLOG(2) << "auto result = CallFunc<Map<GlobalVar, Array<te::Tensor>>>(\"get_var_tensor_map\", nullptr)";
+    PrintVarTensorMap(result);
+    return result;
+  }
+
   virtual ~ExecutorCodegen() {}
 
  protected:
@@ -209,6 +218,10 @@ class RelayBuildModule : public runtime::ModuleNode {
       return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
         ICHECK_EQ(args.num_args, 2);
         *rv = this->Optimize(args[0], args[1], this->params_);
+      });
+    } else if (name == "get_var_tensor_map") {
+      return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
+        *rv = this->executor_codegen_->GetVarTensorMap();
       });
     } else {
       LOG(FATAL) << "Unknown packed function: " << name;
@@ -375,6 +388,7 @@ class RelayBuildModule : public runtime::ModuleNode {
     // Horizontal fusion
     // pass_seqs.push_back(transform::HorizontalFusion(4));
     // Fuse the operations if it is needed.
+    
     pass_seqs.push_back(transform::FuseOps());
 
     // Create a sequential pass and perform optimizations.
@@ -401,7 +415,9 @@ class RelayBuildModule : public runtime::ModuleNode {
         relay_module = transform::FuseOps()(relay_module);
       }
     }
-
+    relay_module = transform::InferType()(relay_module);
+    // relay_module = transform::HorizontalFusion(3)(relay_module);
+    
     relay_module = transform::InferType()(relay_module);
 
     // Inline the functions that have been lifted by the module scope.
@@ -463,6 +479,15 @@ class RelayBuildModule : public runtime::ModuleNode {
     ret_.params = executor_codegen_->GetParams();
 
     auto lowered_funcs = executor_codegen_->GetIRModule();
+
+    // Get output_tensors from FunctionMetaData
+    auto function_metadata = executor_codegen_->GetFunctionMetadata();
+    for(auto ele: function_metadata){
+      VLOG(2) << ele.first << ele.second;
+    }
+    if(function_metadata.count(std::string("kFusion"))){
+      VLOG(2) << "kFusion:" << function_metadata[std::string("kFusion")];
+    }
 
     // No need to build for external functions.
     Target ext_dev("ext_dev");

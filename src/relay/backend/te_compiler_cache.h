@@ -143,6 +143,8 @@ struct CachedFuncNode : public Object {
   tvm::Array<Integer> shape_func_param_states;
   /*! \brief The lowered functions to support the function. */
   IRModule funcs = IRModule(Map<GlobalVar, BaseFunc>({}));
+  /*! \brief Mark the function needs to be scheduled by auto_scheduler */
+  mutable tvm::Integer need_auto_scheduler = tvm::Integer(0);
 
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("target", &target);
@@ -152,6 +154,7 @@ struct CachedFuncNode : public Object {
     v->Visit("schedule", &schedule);
     v->Visit("funcs", &funcs);
     v->Visit("shape_func_param_states", &shape_func_param_states);
+    // v->Visit("need_auto_scheduler", &need_auto_scheduler);
   }
 
   static constexpr const char* _type_key = "relay.CachedFunc";

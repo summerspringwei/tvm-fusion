@@ -349,6 +349,21 @@ def squeeze(a, axis=None):
     return cpp.squeeze(a, axis)
 
 
+def concatenate_expand(a_tuple):
+    """Join a sequence of arrays along 0 axis and reshape to (num_tuple, *tuple_0_shape).
+
+    Parameters
+    ----------
+    a_tuple : tuple of tvm.te.Tensor
+        The arrays to concatenate
+
+    Returns
+    -------
+    ret : tvm.te.Tensor
+    """
+    return cpp.concatenate_expand(a_tuple)
+
+
 def concatenate(a_tuple, axis=0):
     """Join a sequence of arrays along an existing axis.
 

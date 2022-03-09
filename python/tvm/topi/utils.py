@@ -66,15 +66,18 @@ def traverse_inline(s, final_op, callback):
     visited = set()
 
     def _traverse(op):
+        print("python/tvm/topi/utils.py/traverse_inline:69 {}".format(op))
         if op in visited:
             return
         visited.add(op)
         if tag.is_injective(op.tag):
             if op not in s.outputs:
                 s[op].compute_inline()
+                print("python/tvm/topi/utils.py/traverse_inline:76 {}".format(op))
             for tensor in op.input_tensors:
                 if isinstance(tensor.op, tvm.te.ComputeOp):
                     _traverse(tensor.op)
+        print("python/tvm/topi/utils.py/traverse_inline:80 callback {}".format(op))
         callback(op)
 
     _traverse(final_op)

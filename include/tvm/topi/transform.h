@@ -371,6 +371,7 @@ inline Tensor squeeze(const Tensor& x, Array<Integer> axis, bool atleast1d = fal
       name, tag);
 }
 
+
 /*!
  * \brief Join a sequence of tensors along an existing axis
  *
@@ -429,6 +430,33 @@ inline Tensor concatenate(const Array<Tensor>& inputs, int axis = 0, std::string
       },
       name, tag);
 }
+
+
+/**
+ * @brief Join a sequance of tensors along the zero axis and reshape to [num_tensor, *input_tensor_shape]
+ * \param inputs The input tensors
+ * \param name The name of the operation
+ * \param tag The tag to mark the operation
+ * 
+ * \return A Tensor whose op member is the concatenate_expand operation
+ */
+inline Tensor concatenate_expand(const Array<Tensor>& inputs, std::string name = "T_concat_expand",
+                          std::string tag = kInjective) {
+  Array<PrimExpr> out_shape{PrimExpr((int32_t)inputs.size())};
+  for (size_t i = 0; i < inputs[0]->shape.size(); ++i) {
+    out_shape.push_back(inputs[0]->shape[i]);
+  }
+  auto temp_out = concatenate(inputs, 0);
+  return compute(out_shape, [&](const Array<Var>& indices){
+    return temp_out(
+      UnravelIndex(
+        RavelIndex(
+          Array<PrimExpr>{indices.begin(), indices.end()}, 
+          out_shape), 
+        temp_out->shape));
+  });
+}
+
 
 /*!
  * \brief Join a sequence of tensors along a new axis.

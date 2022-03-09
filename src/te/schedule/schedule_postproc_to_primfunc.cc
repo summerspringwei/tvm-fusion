@@ -45,6 +45,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "../../tir/transforms/replace_tensors_in_expr_stmt.h"
+
 namespace tvm {
 namespace te {
 
@@ -102,8 +104,9 @@ class TensorToBufferMapper : public StmtExprMutator {
 
   Stmt VisitStmt_(const ProducerStoreNode* op) final {
     Tensor tensor = Downcast<Tensor>(op->producer);
+    VLOG(2) << "ProducerStoreNode start " << GetRef<ProducerStore>(op);
     Buffer buffer = GetBuffer(tensor);
-
+    VLOG(2) << "ProducerStoreNode end " << GetRef<ProducerStore>(op);
     auto ret = StmtExprMutator::VisitStmt_(op);
     op = ret.as<ProducerStoreNode>();
 
@@ -114,7 +117,9 @@ class TensorToBufferMapper : public StmtExprMutator {
     auto ret = StmtExprMutator::VisitExpr_(op);
     op = ret.as<ProducerLoadNode>();
     Tensor tensor = Downcast<Tensor>(op->producer);
+    VLOG(2) << "ProducerLoadNode start " << GetRef<ProducerLoad>(op);
     Buffer buffer = GetBuffer(tensor);
+    VLOG(2) << "ProducerLoadNode end " << GetRef<ProducerLoad>(op);
     return tir::BufferLoad(buffer, op->indices);
   }
 
@@ -124,7 +129,18 @@ class TensorToBufferMapper : public StmtExprMutator {
   }
 
   Buffer GetBuffer(const Tensor& tensor, String storage_scope = "", bool allow_alloc = false) {
+    VLOG(2) << "{";
+    for(auto& ele: this->buffer_map_){
+      VLOG(2) << ele.first << " hash: " << ObjectPtrHash()(ele.first) << " -> " << ele.second;
+    }
     auto it = buffer_map_.find(tensor);
+    if(it == buffer_map_.end()) {
+      VLOG(2) << "bugger_map_ cannot find tensor" << tensor;
+      if(!allow_alloc){
+        VLOG(2) << "Bug here!" << tensor << " hash: " << ObjectPtrHash()(tensor) << " op: " << Downcast<PlaceholderOp>(tensor->op);
+      }
+    }
+    VLOG(2) << "}";
     if (it != buffer_map_.end()) return it->second;
     ICHECK(allow_alloc) << "Cannot find the Realization point of tensor " << tensor;
 
@@ -155,6 +171,8 @@ PrimFunc SchedulePostProcToPrimFunc(Array<ObjectRef> arg_list, Stmt body,
     } else if (auto* n = var.as<te::TensorNode>()) {
       te::Tensor tensor = GetRef<te::Tensor>(n);
       ICHECK(!extern_buffer.count(tensor));
+      VLOG(2) << tensor << " op: " << tensor->op;
+      tvm::tir::transforms::FVerifyTensorConnect(tensor);
 
       tir::Buffer buffer = CreateBufferFor(tensor);
       tir::Var bptr(buffer->name, PrimType(DataType::Handle()));
@@ -168,7 +186,9 @@ PrimFunc SchedulePostProcToPrimFunc(Array<ObjectRef> arg_list, Stmt body,
       buffer_map.Set(bptr, buffer);
     }
   }
-
+  // for(auto& ele: extern_buffer){
+  //   VLOG(2) << ele.first << " -> " << ele.second;
+  // }
   body = TensorToBufferMapper(std::move(extern_buffer))(std::move(body));
   // We mark this PrimFunc as coming from a TE schedule
   return WithAttr(tir::PrimFunc(params, body, VoidType(), buffer_map), "from_legacy_te_schedule",
