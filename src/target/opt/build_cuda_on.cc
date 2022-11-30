@@ -107,7 +107,10 @@ std::string NVRTCCompile(const std::string& code, bool include_path = false) {
   }
   NVRTC_CALL(nvrtcCreateProgram(&prog, code.c_str(), nullptr, 0, nullptr, nullptr));
   nvrtcResult compile_res = nvrtcCompileProgram(prog, param_cstrings.size(), param_cstrings.data());
-
+  printf("cuda compile flags: ");
+  for(auto cs: param_cstrings){
+    printf("%s", cs);
+  }printf("\n");
   size_t log_size;
   NVRTC_CALL(nvrtcGetProgramLogSize(prog, &log_size));
   std::string log;

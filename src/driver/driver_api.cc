@@ -312,7 +312,23 @@ bool ShapeEqual(te::Tensor t1, te::Tensor t2){
 IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const std::string& name,
                           const std::unordered_map<te::Tensor, tir::Buffer>& binds) {
   sch = sch.normalize();
-
+  
+  for(auto& stage: sch->stages){
+    VLOG(0) << stage;
+    for(auto& iv: stage->all_iter_vars){
+      VLOG(0) << iv;
+    }
+    for(auto& lv: stage->leaf_iter_vars){
+      VLOG(0) << lv;
+    }
+    VLOG(0) << stage->attach_ivar;
+    for(auto& relation: stage->relations){
+      VLOG(0) << relation;
+    }
+    for(auto& bind: stage->iter_var_attrs){
+      VLOG(0) << bind.first << " bind to " << bind.second;
+    }
+  }
   transform::PassContext pass_ctx = transform::PassContext::Current();
   bool debug_keep_trivial_loop =
       pass_ctx->GetConfig<Bool>("tir.debug_keep_trivial_loop", Bool(false)).value();

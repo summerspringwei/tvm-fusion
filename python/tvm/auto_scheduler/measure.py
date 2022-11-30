@@ -586,6 +586,99 @@ class LocalRPCMeasureContext:
         time.sleep(0.5)
 
 
+class RemoteRPCMeasureContext:
+    """A context wrapper for running RPCRunner locally.
+    This will launch a local RPC Tracker and local RPC Server.
+
+    Parameters
+    ----------
+    priority : int = 1
+        The priority of this run request, larger is more prior.
+    n_parallel : int = 1
+        The number of tasks run in parallel.
+    timeout : int = 10
+        The timeout limit (in second) for each run.
+        This is used in a wrapper of the multiprocessing.Process.join().
+    number : int = 3
+        The number of times to run the generated code for taking average.
+        We call these runs as one `repeat` of measurement.
+    repeat : int = 1
+        The number of times to repeat the measurement.
+        In total, the generated code will be run (1 + number x repeat) times,
+        where the first "1" is warm up and will be discarded.
+        The returned result contains `repeat` costs,
+        each of which is an average of `number` costs.
+    min_repeat_ms : int = 0
+        The minimum duration of one `repeat` in milliseconds.
+        By default, one `repeat` contains `number` runs. If this parameter is set,
+        the parameters `number` will be dynamically adjusted to meet the
+        minimum duration requirement of one `repeat`.
+        i.e., When the run time of one `repeat` falls below this time, the `number` parameter
+        will be automatically increased.
+    cooldown_interval : float = 0.0
+        The cool down interval between two measurements in seconds.
+    enable_cpu_cache_flush: bool = False
+        Whether to flush cache on CPU between repeated measurements.
+        Flushing cache can make the measured latency of one operator closer to
+        its actual latency during end-to-end inference.
+        To make this option effective, the argument `number` should also be set to 1.
+        This is only has effect on CPU task.
+    """
+
+    def __init__(
+        self,
+        server_addr,
+        server_port,
+        device_key,
+        priority=1,
+        n_parallel=1,
+        timeout=10,
+        number=3,
+        repeat=1,
+        min_repeat_ms=0,
+        cooldown_interval=0.0,
+        enable_cpu_cache_flush=False,
+    ):
+        # pylint: disable=import-outside-toplevel
+        from tvm.rpc.tracker import Tracker
+        from tvm.rpc.server import Server
+
+        dev = tvm.device("cuda", 0)
+        if dev.exist:
+            cuda_arch = "sm_" + "".join(dev.compute_version.split("."))
+            set_cuda_target_arch(cuda_arch)
+        # self.tracker = Tracker(port=9090, port_end=10000, silent=True)
+        # device_key = "$remote$device$%d" % self.tracker.port
+        # self.server = Server(
+        #     port=self.tracker.port,
+        #     port_end=10000,
+        #     key=device_key,
+        #     silent=True,
+        #     tracker_addr=("127.0.0.1", self.tracker.port),
+        # )
+        self.runner = RPCRunner(
+            device_key,
+            server_addr,
+            server_port,
+            priority,
+            n_parallel,
+            timeout,
+            number,
+            repeat,
+            min_repeat_ms,
+            cooldown_interval,
+            enable_cpu_cache_flush,
+        )
+        # Wait for the processes to start
+        time.sleep(0.5)
+
+    def __del__(self):
+        # Close the tracker and server before exit
+        # self.tracker.terminate()
+        # self.server.terminate()
+        time.sleep(0.5)
+
+
 class MeasureErrorNo(object):
     """Error type for MeasureResult."""
 

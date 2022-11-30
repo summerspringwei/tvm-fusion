@@ -316,6 +316,9 @@ class SchedulePostProc : public StmtExprMutator {
 };
 
 Stmt ScheduleOps(Schedule sch, Map<IterVar, Range> dom_map_, bool debug_keep_trivial_loop) {
+  for(auto dom: dom_map_){
+    VLOG(0) << dom.first << " range " << dom.second;
+  }
   Stmt body = Stmt();
   std::unordered_map<IterVar, Range> dom_map = as_unordered_map(dom_map_);
   // scan init and scan updates

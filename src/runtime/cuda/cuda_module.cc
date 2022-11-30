@@ -31,6 +31,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <iostream>
+#include <fstream>
+#include <streambuf>
 
 #include "../file_utils.h"
 #include "../meta_data.h"
@@ -173,7 +176,7 @@ class CUDAWrappedFunc {
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
                                      wl.block_dim(2), wl.dyn_shmem_size, strm, void_args, nullptr);
     // LOG(INFO) << m_->GetSource("cu");
-    // printf("%s\n", m_->GetSource("cu").c_str());
+    
     if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
       const char* msg;
       cuGetErrorName(result, &msg);
@@ -191,6 +194,19 @@ class CUDAWrappedFunc {
       }
       LOG(FATAL) << os.str();
     }
+    std::ostringstream os;
+    os << " // grid=(" << wl.grid_dim(0) << "," << wl.grid_dim(1) << "," << wl.grid_dim(2) << "), "
+       << " block=(" << wl.block_dim(0) << "," << wl.block_dim(1) << "," << wl.block_dim(2)
+       << ")\n";
+    VLOG(0) << os.str() << m_->GetSource("cu");
+
+    std::ifstream t("/tmp/tvm_name_cuda_code");
+    std::string file_name((std::istreambuf_iterator<char>(t)),
+                    std::istreambuf_iterator<char>());
+    VLOG(0) << file_name;
+    std::ofstream out(file_name);
+    out << os.str() << m_->GetSource("cu");
+    out.close();
   }
 
  private:
